@@ -27,7 +27,7 @@ function resolveCorsOrigin(origin, callback) {
 
 app.use(helmet());
 app.use(cors({ origin: resolveCorsOrigin }));
-app.use(express.json({ limit: "100kb" }));
+app.use(express.json({ limit: "1mb" }));
 
 app.get("/api/health", (req, res) => {
   res.json({
