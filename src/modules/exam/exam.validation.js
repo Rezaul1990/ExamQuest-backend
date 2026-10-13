@@ -73,7 +73,7 @@ const importCommitSchema = z.object({
   ).min(1).max(1000),
 });
 
-const questionPaperSchema = z.object({
+const questionPaperBaseSchema = z.object({
   title: z.string().trim().min(2).max(180),
   bookId: objectId,
   chapterIds: z.array(objectId).default([]),
@@ -83,12 +83,19 @@ const questionPaperSchema = z.object({
   availableFrom: z.coerce.date().optional(),
   availableUntil: z.coerce.date().optional(),
   status: status.default("draft"),
-}).refine((data) => !data.availableFrom || !data.availableUntil || data.availableUntil > data.availableFrom, {
-  path: ["availableUntil"],
-  message: "availableUntil must be after availableFrom",
 });
 
-const questionPaperUpdateSchema = questionPaperSchema.partial().refine((data) => Object.keys(data).length > 0, "At least one field is required");
+const availabilityWindowIsValid = (data) => !data.availableFrom || !data.availableUntil || data.availableUntil > data.availableFrom;
+const availabilityWindowMessage = {
+  path: ["availableUntil"],
+  message: "availableUntil must be after availableFrom",
+};
+
+const questionPaperSchema = questionPaperBaseSchema.refine(availabilityWindowIsValid, availabilityWindowMessage);
+const questionPaperUpdateSchema = questionPaperBaseSchema
+  .partial()
+  .refine((data) => Object.keys(data).length > 0, "At least one field is required")
+  .refine(availabilityWindowIsValid, availabilityWindowMessage);
 const publishSchema = z.object({
   status: z.enum(["draft", "published", "archived"]),
   availableFrom: z.coerce.date().optional(),
