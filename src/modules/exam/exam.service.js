@@ -62,10 +62,26 @@ function serializePaper(paper, questionCount) {
     durationMinutes: paper.durationMinutes,
     totalMarks: paper.totalMarks,
     questionCount: questionCount ?? paper.questions.length,
+    availableFrom: paper.availableFrom,
+    availableUntil: paper.availableUntil,
     status: paper.status,
     createdAt: paper.createdAt,
     updatedAt: paper.updatedAt,
   };
+}
+
+function applyAvailablePaperWindow(query) {
+  const now = new Date();
+  query.$and = [
+    { $or: [{ availableFrom: { $exists: false } }, { availableFrom: null }, { availableFrom: { $lte: now } }] },
+    { $or: [{ availableUntil: { $exists: false } }, { availableUntil: null }, { availableUntil: { $gte: now } }] },
+  ];
+  return query;
+}
+
+function isPaperOpen(paper) {
+  const now = new Date();
+  return (!paper.availableFrom || paper.availableFrom <= now) && (!paper.availableUntil || paper.availableUntil >= now);
 }
 
 function serializeAttempt(attempt, paper, questions = []) {
@@ -295,7 +311,10 @@ async function listQuestionPapers(filters = {}, { memberOnly = false } = {}) {
   const query = {};
   if (filters.bookId) query.bookId = filters.bookId;
   if (filters.chapterId) query.chapterIds = filters.chapterId;
-  if (memberOnly) query.status = "published";
+  if (memberOnly) {
+    query.status = "published";
+    applyAvailablePaperWindow(query);
+  }
   const papers = await QuestionPaper.find(query).sort({ createdAt: -1 }).limit(300);
   return papers.map((paper) => serializePaper(paper));
 }
@@ -310,6 +329,8 @@ async function createQuestionPaper(payload, actorId) {
     chapterIds: payload.chapterIds?.length ? payload.chapterIds : [...new Set(questions.map((question) => question.chapterId.toString()))],
     durationMinutes: payload.durationMinutes,
     totalMarks: payload.totalMarks,
+    availableFrom: payload.availableFrom,
+    availableUntil: payload.availableUntil,
     questions: payload.questionIds.map((questionId) => ({ questionId, marks: Math.max(1, payload.totalMarks / payload.questionIds.length) })),
     status: payload.status,
     createdByUserId: actorId,
@@ -337,6 +358,7 @@ async function updateQuestionPaper(id, payload) {
 async function startAttempt(paperId, memberUserId) {
   const paper = await QuestionPaper.findOne({ _id: paperId, status: "published" });
   if (!paper) return { error: "QUESTION_PAPER_NOT_FOUND" };
+  if (!isPaperOpen(paper)) return { error: "QUESTION_PAPER_NOT_OPEN" };
   const existing = await ExamAttempt.findOne({ memberUserId, questionPaperId: paper._id, status: "in_progress" });
   const attempt = existing || (await ExamAttempt.create({ memberUserId, questionPaperId: paper._id, total: paper.totalMarks }));
   const questions = await Question.find({ _id: { $in: paper.questions.map((item) => item.questionId) }, status: "active" });

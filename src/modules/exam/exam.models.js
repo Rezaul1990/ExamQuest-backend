@@ -73,6 +73,8 @@ const questionPaperSchema = new mongoose.Schema(
     durationMinutes: { type: Number, required: true, min: 1, max: 300 },
     totalMarks: { type: Number, required: true, min: 1 },
     questions: { type: [paperQuestionSchema], required: true },
+    availableFrom: { type: Date, index: true },
+    availableUntil: { type: Date, index: true },
     status: { type: String, enum: STATUS, default: "draft", index: true },
     createdByUserId: { type: mongoose.Schema.Types.ObjectId, ref: "User", required: true },
   },

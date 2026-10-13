@@ -80,11 +80,23 @@ const questionPaperSchema = z.object({
   durationMinutes: z.coerce.number().int().min(1).max(300),
   totalMarks: z.coerce.number().int().min(1).max(1000),
   questionIds: z.array(objectId).min(1).max(200),
+  availableFrom: z.coerce.date().optional(),
+  availableUntil: z.coerce.date().optional(),
   status: status.default("draft"),
+}).refine((data) => !data.availableFrom || !data.availableUntil || data.availableUntil > data.availableFrom, {
+  path: ["availableUntil"],
+  message: "availableUntil must be after availableFrom",
 });
 
 const questionPaperUpdateSchema = questionPaperSchema.partial().refine((data) => Object.keys(data).length > 0, "At least one field is required");
-const publishSchema = z.object({ status: z.enum(["draft", "published", "archived"]) });
+const publishSchema = z.object({
+  status: z.enum(["draft", "published", "archived"]),
+  availableFrom: z.coerce.date().optional(),
+  availableUntil: z.coerce.date().optional(),
+}).refine((data) => !data.availableFrom || !data.availableUntil || data.availableUntil > data.availableFrom, {
+  path: ["availableUntil"],
+  message: "availableUntil must be after availableFrom",
+});
 const submitAttemptSchema = z.object({
   answers: z.array(z.object({ questionId: objectId, selectedOption: optionKey })).default([]),
 });
