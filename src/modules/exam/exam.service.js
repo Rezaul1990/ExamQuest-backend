@@ -2,6 +2,8 @@ const mongoose = require("mongoose");
 const { Book, Chapter, Question, QuestionPaper, ExamAttempt } = require("./exam.models");
 
 const IMPORT_COLUMNS = ["book", "chapter", "question", "optionA", "optionB", "optionC", "optionD", "correctOption"];
+const IMPORT_OPTIONAL_COLUMNS = ["explanation", "difficulty", "subject", "className", "group"];
+const IMPORT_MAX_ROWS = 50;
 
 function toId(value) {
   return new mongoose.Types.ObjectId(value);
@@ -13,6 +15,26 @@ function normalizeText(value) {
 
 function normalizeOption(value) {
   return normalizeText(value).toUpperCase();
+}
+
+function normalizeKey(value) {
+  return normalizeText(value).toLowerCase();
+}
+
+function compactValue(value) {
+  const text = normalizeText(value);
+  return text || undefined;
+}
+
+function importDuplicateKey(row) {
+  return [
+    normalizeKey(row.book),
+    normalizeKey(row.subject || row.book),
+    normalizeKey(row.className),
+    normalizeKey(row.group),
+    normalizeKey(row.chapter),
+    normalizeKey(row.question),
+  ].join("|");
 }
 
 function serializeBook(book) {
@@ -53,14 +75,18 @@ function serializeQuestion(question, includeCorrect = false) {
   return data;
 }
 
-function serializePaper(paper, questionCount) {
+function serializePaper(paper, questionCount, book) {
   return {
     id: paper._id.toString(),
     title: paper.title,
     bookId: paper.bookId.toString(),
+    subject: book?.subject,
+    className: book?.className,
+    group: book?.group,
     chapterIds: (paper.chapterIds || []).map((id) => id.toString()),
     durationMinutes: paper.durationMinutes,
     totalMarks: paper.totalMarks,
+    passMark: paper.passMark ?? Math.ceil(paper.totalMarks * 0.4),
     questionCount: questionCount ?? paper.questions.length,
     availableFrom: paper.availableFrom,
     availableUntil: paper.availableUntil,
@@ -152,7 +178,7 @@ function buildQuestionPayload(payload, actorId) {
   return {
     bookId: payload.bookId,
     chapterId: payload.chapterId,
-    text: payload.text,
+    text: payload.text || payload.question,
     options: [
       { key: "A", text: payload.optionA },
       { key: "B", text: payload.optionB },
@@ -212,6 +238,17 @@ async function updateQuestion(id, payload) {
   return question ? serializeQuestion(question, true) : null;
 }
 
+async function deleteQuestion(id) {
+  const question = await Question.findById(id);
+  if (!question) return null;
+  const linkedPaper = await QuestionPaper.findOne({ "questions.questionId": question._id, status: { $ne: "archived" } }).select("_id title status questions bookId chapterIds durationMinutes totalMarks passMark availableFrom availableUntil createdAt updatedAt");
+  if (linkedPaper) {
+    return { error: "QUESTION_IN_USE", questionPaper: serializePaper(linkedPaper) };
+  }
+  await Question.deleteOne({ _id: question._id });
+  return { deletedQuestionId: question._id.toString() };
+}
+
 function parseCsv(csvText) {
   const rows = [];
   let current = "";
@@ -243,10 +280,12 @@ function parseCsv(csvText) {
   return rows;
 }
 
-function previewImport(csvText) {
-  const parsed = parseCsv(csvText);
-  if (!parsed.length) return { rows: [], validRows: [], invalidCount: 0, validCount: 0 };
+function validateImportRecords(parsed) {
+  if (!parsed.length) return { rows: [], validRows: [], invalidCount: 0, validCount: 0, duplicateCount: 0, errors: [] };
   const headers = parsed[0].map((header) => normalizeText(header));
+  const headerSet = new Set(headers);
+  const missingHeaders = [...IMPORT_COLUMNS, ...IMPORT_OPTIONAL_COLUMNS].filter((column) => !headerSet.has(column));
+  const seen = new Map();
   const records = parsed.slice(1).map((cells, index) => {
     const source = {};
     headers.forEach((header, columnIndex) => {
@@ -268,43 +307,144 @@ function previewImport(csvText) {
       group: source.group || "",
     };
     const errors = [];
+    missingHeaders
+      .filter((column) => IMPORT_COLUMNS.includes(column))
+      .forEach((column) => errors.push(`${column} column is missing`));
     IMPORT_COLUMNS.forEach((column) => {
       if (!normalized[column]) errors.push(`${column} is required`);
     });
     if (!["A", "B", "C", "D"].includes(normalized.correctOption)) errors.push("correctOption must be A, B, C or D");
     if (!["easy", "medium", "hard"].includes(normalized.difficulty)) errors.push("difficulty must be easy, medium or hard");
-    return { rowNumber: index + 2, data: normalized, errors };
+    if (index >= IMPORT_MAX_ROWS) errors.push(`Only the first ${IMPORT_MAX_ROWS} questions can be imported at once`);
+    const duplicateKey = importDuplicateKey(normalized);
+    if (seen.has(duplicateKey)) {
+      errors.push(`Duplicate of CSV row ${seen.get(duplicateKey)}`);
+    } else {
+      seen.set(duplicateKey, index + 2);
+    }
+    return { rowNumber: index + 2, data: normalized, errors, duplicate: false };
   });
   return {
     rows: records,
     validRows: records.filter((row) => !row.errors.length).map((row) => row.data),
     validCount: records.filter((row) => !row.errors.length).length,
     invalidCount: records.filter((row) => row.errors.length).length,
+    duplicateCount: records.filter((row) => row.errors.some((error) => error.startsWith("Duplicate of CSV row"))).length,
+    errors: parsed.length - 1 > IMPORT_MAX_ROWS ? [`CSV contains ${parsed.length - 1} rows. Import supports maximum ${IMPORT_MAX_ROWS} questions per file.`] : [],
   };
 }
 
+async function markExistingQuestionDuplicates(preview) {
+  const validRows = preview.rows.filter((row) => !row.errors.length);
+  if (!validRows.length) return preview;
+  const bookTitles = [...new Set(validRows.map((row) => row.data.book))];
+  const subjects = [...new Set(validRows.map((row) => row.data.subject || row.data.book))];
+  const books = await Book.find({ title: { $in: bookTitles }, subject: { $in: subjects } });
+  if (!books.length) return preview;
+
+  const bookMap = new Map(
+    books.map((book) => [
+      [normalizeKey(book.title), normalizeKey(book.subject), normalizeKey(book.className), normalizeKey(book.group)].join("|"),
+      book,
+    ])
+  );
+  const chapters = await Chapter.find({ bookId: { $in: books.map((book) => book._id) }, title: { $in: [...new Set(validRows.map((row) => row.data.chapter))] } });
+  const chapterMap = new Map(chapters.map((chapter) => [`${chapter.bookId.toString()}|${normalizeKey(chapter.title)}`, chapter]));
+  const questions = await Question.find({
+    chapterId: { $in: chapters.map((chapter) => chapter._id) },
+    text: { $in: [...new Set(validRows.map((row) => row.data.question))] },
+  });
+  const questionMap = new Map(questions.map((question) => [`${question.chapterId.toString()}|${normalizeKey(question.text)}`, question]));
+  const existingKeys = new Set(questionMap.keys());
+
+  preview.rows = preview.rows.map((row) => {
+    if (row.errors.length) return row;
+    const bookKey = [normalizeKey(row.data.book), normalizeKey(row.data.subject || row.data.book), normalizeKey(row.data.className), normalizeKey(row.data.group)].join("|");
+    const book = bookMap.get(bookKey);
+    const chapter = book ? chapterMap.get(`${book._id.toString()}|${normalizeKey(row.data.chapter)}`) : null;
+    if (chapter && existingKeys.has(`${chapter._id.toString()}|${normalizeKey(row.data.question)}`)) {
+      const existingQuestion = questionMap.get(`${chapter._id.toString()}|${normalizeKey(row.data.question)}`);
+      return { ...row, duplicate: true, existingQuestionId: existingQuestion?._id.toString(), errors: [...row.errors, "Question already exists in the question bank"] };
+    }
+    return row;
+  });
+  preview.validRows = preview.rows.filter((row) => !row.errors.length).map((row) => row.data);
+  preview.validCount = preview.validRows.length;
+  preview.invalidCount = preview.rows.filter((row) => row.errors.length).length;
+  preview.duplicateCount = preview.rows.filter((row) => row.duplicate || row.errors.some((error) => error.startsWith("Duplicate of CSV row"))).length;
+  return preview;
+}
+
+async function previewImport(csvText) {
+  return markExistingQuestionDuplicates(validateImportRecords(parseCsv(csvText)));
+}
+
 async function commitImport(rows, actorId) {
-  const savedQuestions = [];
-  for (const row of rows) {
-    const book = await Book.findOneAndUpdate(
-      { title: row.book, subject: row.subject || row.book, className: row.className || undefined, group: row.group || undefined },
-      { $setOnInsert: { createdByUserId: actorId, status: "published" } },
-      { upsert: true, new: true, setDefaultsOnInsert: true }
-    );
-    const chapter = await Chapter.findOneAndUpdate(
-      { bookId: book._id, title: row.chapter },
-      { $setOnInsert: { createdByUserId: actorId, status: "published" } },
-      { upsert: true, new: true, setDefaultsOnInsert: true }
-    );
-    const payload = buildQuestionPayload({ ...row, bookId: book._id.toString(), chapterId: chapter._id.toString() }, actorId);
-    const question = await Question.findOneAndUpdate(
-      { bookId: book._id, chapterId: chapter._id, text: row.question },
-      { $set: payload },
-      { upsert: true, new: true, setDefaultsOnInsert: true }
-    ).select("+correctOption");
-    savedQuestions.push(serializeQuestion(question, true));
+  const importHeaders = [...IMPORT_COLUMNS, ...IMPORT_OPTIONAL_COLUMNS];
+  const preview = validateImportRecords([
+    importHeaders,
+    ...rows.map((row) => importHeaders.map((header) => row[header] || "")),
+  ]);
+  if (preview.invalidCount) {
+    return { importedCount: 0, skippedDuplicateCount: 0, invalidCount: preview.invalidCount, rows: preview.rows, questions: [], summary: "Import rejected because one or more rows are invalid." };
   }
-  return savedQuestions;
+
+  const savedQuestions = [];
+  const skippedRows = [];
+  const bookCache = new Map();
+  const chapterCache = new Map();
+  const questionOps = [];
+  const questionRefs = [];
+
+  for (const row of preview.validRows) {
+    const bookKey = [normalizeKey(row.book), normalizeKey(row.subject || row.book), normalizeKey(row.className), normalizeKey(row.group)].join("|");
+    let book = bookCache.get(bookKey);
+    if (!book) {
+      book = await Book.findOneAndUpdate(
+        { title: row.book, subject: row.subject || row.book, className: compactValue(row.className), group: compactValue(row.group) },
+        { $setOnInsert: { title: row.book, subject: row.subject || row.book, className: compactValue(row.className), group: compactValue(row.group), createdByUserId: actorId, status: "published" } },
+        { upsert: true, new: true, setDefaultsOnInsert: true }
+      );
+      bookCache.set(bookKey, book);
+    }
+    const chapterKey = `${book._id.toString()}|${normalizeKey(row.chapter)}`;
+    let chapter = chapterCache.get(chapterKey);
+    if (!chapter) {
+      chapter = await Chapter.findOneAndUpdate(
+        { bookId: book._id, title: row.chapter },
+        { $setOnInsert: { bookId: book._id, title: row.chapter, createdByUserId: actorId, status: "published" } },
+        { upsert: true, new: true, setDefaultsOnInsert: true }
+      );
+      chapterCache.set(chapterKey, chapter);
+    }
+
+    const existing = await Question.exists({ bookId: book._id, chapterId: chapter._id, text: row.question });
+    if (existing) {
+      skippedRows.push({ data: row, reason: "Question already exists in the question bank" });
+      continue;
+    }
+    const payload = buildQuestionPayload({ ...row, bookId: book._id.toString(), chapterId: chapter._id.toString() }, actorId);
+    questionOps.push({ insertOne: { document: payload } });
+    questionRefs.push({ bookId: book._id, chapterId: chapter._id, text: row.question });
+  }
+
+  if (questionOps.length) {
+    await Question.bulkWrite(questionOps, { ordered: false });
+    const inserted = await Question.find({
+      $or: questionRefs.map((ref) => ({ bookId: ref.bookId, chapterId: ref.chapterId, text: ref.text })),
+    }).select("+correctOption");
+    savedQuestions.push(...inserted.map((question) => serializeQuestion(question, true)));
+  }
+
+  return {
+    importedCount: savedQuestions.length,
+    skippedDuplicateCount: skippedRows.length,
+    invalidCount: 0,
+    rows: preview.rows,
+    skippedRows,
+    questions: savedQuestions,
+    summary: `${savedQuestions.length} imported, ${skippedRows.length} duplicate skipped.`,
+  };
 }
 
 async function listQuestionPapers(filters = {}, { memberOnly = false } = {}) {
@@ -314,51 +454,96 @@ async function listQuestionPapers(filters = {}, { memberOnly = false } = {}) {
   if (memberOnly) {
     query.status = "published";
     applyAvailablePaperWindow(query);
+    if (filters.memberUserId) {
+      const completedAttempts = await ExamAttempt.find({
+        memberUserId: filters.memberUserId,
+        status: "submitted",
+      }).select("questionPaperId");
+      const completedPaperIds = completedAttempts.map((attempt) => attempt.questionPaperId);
+      if (completedPaperIds.length) query._id = { $nin: completedPaperIds };
+    }
+  } else if (!filters.includeArchived) {
+    query.status = { $ne: "archived" };
   }
   const papers = await QuestionPaper.find(query).sort({ createdAt: -1 }).limit(300);
-  return papers.map((paper) => serializePaper(paper));
+  const bookIds = [...new Set(papers.map((paper) => paper.bookId.toString()))];
+  const books = await Book.find({ _id: { $in: bookIds.map(toId) } });
+  const bookMap = new Map(books.map((book) => [book._id.toString(), book]));
+  return papers.map((paper) => serializePaper(paper, undefined, bookMap.get(paper.bookId.toString())));
 }
 
 async function createQuestionPaper(payload, actorId) {
-  const questions = await Question.find({ _id: { $in: payload.questionIds.map(toId) }, status: "active" });
+  const [book, questions] = await Promise.all([
+    Book.findById(payload.bookId),
+    Question.find({ _id: { $in: payload.questionIds.map(toId) }, status: "active" }),
+  ]);
+  if (!book) return { error: "BOOK_NOT_FOUND" };
   if (questions.length !== payload.questionIds.length) return { error: "QUESTION_SELECTION_INVALID" };
   if (questions.some((question) => question.bookId.toString() !== payload.bookId)) return { error: "QUESTION_BOOK_MISMATCH" };
+  if (payload.passMark > payload.totalMarks) return { error: "PASS_MARK_EXCEEDS_TOTAL" };
   const paper = await QuestionPaper.create({
     title: payload.title,
     bookId: payload.bookId,
     chapterIds: payload.chapterIds?.length ? payload.chapterIds : [...new Set(questions.map((question) => question.chapterId.toString()))],
     durationMinutes: payload.durationMinutes,
     totalMarks: payload.totalMarks,
+    passMark: payload.passMark,
     availableFrom: payload.availableFrom,
     availableUntil: payload.availableUntil,
     questions: payload.questionIds.map((questionId) => ({ questionId, marks: Math.max(1, payload.totalMarks / payload.questionIds.length) })),
     status: payload.status,
     createdByUserId: actorId,
   });
-  return { paper: serializePaper(paper) };
+  return { paper: serializePaper(paper, undefined, book) };
 }
 
 async function updateQuestionPaper(id, payload) {
   const update = { ...payload };
+  const currentPaper = await QuestionPaper.findById(id);
+  if (!currentPaper) return null;
+  const totalMarks = payload.totalMarks || currentPaper.totalMarks;
+  const passMark = payload.passMark || currentPaper.passMark;
+  if (passMark > totalMarks) return { error: "PASS_MARK_EXCEEDS_TOTAL" };
   if (payload.questionIds) {
-    const paper = await QuestionPaper.findById(id);
-    if (!paper && !payload.bookId) return null;
-    const bookId = payload.bookId || paper.bookId.toString();
+    const bookId = payload.bookId || currentPaper.bookId.toString();
     const questions = await Question.find({ _id: { $in: payload.questionIds.map(toId) }, status: "active" });
     if (questions.length !== payload.questionIds.length) return { error: "QUESTION_SELECTION_INVALID" };
     if (questions.some((question) => question.bookId.toString() !== bookId)) return { error: "QUESTION_BOOK_MISMATCH" };
-    update.questions = payload.questionIds.map((questionId) => ({ questionId, marks: Math.max(1, (payload.totalMarks || paper.totalMarks) / payload.questionIds.length) }));
+    update.questions = payload.questionIds.map((questionId) => ({ questionId, marks: Math.max(1, totalMarks / payload.questionIds.length) }));
     update.chapterIds = payload.chapterIds?.length ? payload.chapterIds : [...new Set(questions.map((question) => question.chapterId.toString()))];
     delete update.questionIds;
   }
   const paper = await QuestionPaper.findByIdAndUpdate(id, update, { new: true, runValidators: true });
-  return paper ? serializePaper(paper) : null;
+  if (!paper) return null;
+  const book = await Book.findById(paper.bookId);
+  return serializePaper(paper, undefined, book);
+}
+
+async function deleteQuestionPaper(id) {
+  const paper = await QuestionPaper.findById(id);
+  if (!paper) return null;
+  const attemptCount = await ExamAttempt.countDocuments({ questionPaperId: paper._id });
+  if (attemptCount > 0) {
+    const archiveSuffix = `archived-${paper._id.toString().slice(-6)}`;
+    const archivedTitle = paper.title.includes(archiveSuffix) ? paper.title : `${paper.title} (${archiveSuffix})`;
+    const archived = await QuestionPaper.findByIdAndUpdate(
+      paper._id,
+      { status: "archived", title: archivedTitle, availableUntil: new Date() },
+      { new: true, runValidators: true }
+    );
+    const book = await Book.findById(archived.bookId);
+    return { deletedMode: "archived", questionPaper: serializePaper(archived, undefined, book), attemptCount };
+  }
+  await QuestionPaper.deleteOne({ _id: paper._id });
+  return { deletedMode: "deleted", questionPaperId: paper._id.toString(), attemptCount };
 }
 
 async function startAttempt(paperId, memberUserId) {
   const paper = await QuestionPaper.findOne({ _id: paperId, status: "published" });
   if (!paper) return { error: "QUESTION_PAPER_NOT_FOUND" };
   if (!isPaperOpen(paper)) return { error: "QUESTION_PAPER_NOT_OPEN" };
+  const submitted = await ExamAttempt.exists({ memberUserId, questionPaperId: paper._id, status: "submitted" });
+  if (submitted) return { error: "EXAM_ALREADY_SUBMITTED" };
   const existing = await ExamAttempt.findOne({ memberUserId, questionPaperId: paper._id, status: "in_progress" });
   const attempt = existing || (await ExamAttempt.create({ memberUserId, questionPaperId: paper._id, total: paper.totalMarks }));
   const questions = await Question.find({ _id: { $in: paper.questions.map((item) => item.questionId) }, status: "active" });
@@ -429,11 +614,13 @@ module.exports = {
   listQuestions,
   createQuestion,
   updateQuestion,
+  deleteQuestion,
   previewImport,
   commitImport,
   listQuestionPapers,
   createQuestionPaper,
   updateQuestionPaper,
+  deleteQuestionPaper,
   startAttempt,
   submitAttempt,
   listAttempts,

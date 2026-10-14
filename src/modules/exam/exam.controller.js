@@ -91,9 +91,20 @@ async function updateQuestion(req, res, next) {
   }
 }
 
+async function deleteQuestion(req, res, next) {
+  try {
+    const result = await service.deleteQuestion(req.params.id);
+    if (!result) return sendMissing(res, "QUESTION_NOT_FOUND");
+    if (result.error) return sendRuleError(res, result.error);
+    res.json({ success: true, data: result });
+  } catch (error) {
+    next(error);
+  }
+}
+
 async function previewImport(req, res, next) {
   try {
-    res.json({ success: true, data: service.previewImport(req.validatedBody.csvText) });
+    res.json({ success: true, data: await service.previewImport(req.validatedBody.csvText) });
   } catch (error) {
     next(error);
   }
@@ -101,8 +112,8 @@ async function previewImport(req, res, next) {
 
 async function commitImport(req, res, next) {
   try {
-    const questions = await service.commitImport(req.validatedBody.rows, req.user._id);
-    res.status(201).json({ success: true, data: { importedCount: questions.length, questions } });
+    const result = await service.commitImport(req.validatedBody.rows, req.user._id);
+    res.status(201).json({ success: true, data: result });
   } catch (error) {
     next(error);
   }
@@ -147,6 +158,16 @@ async function updateQuestionPaperStatus(req, res, next) {
   }
 }
 
+async function deleteQuestionPaper(req, res, next) {
+  try {
+    const result = await service.deleteQuestionPaper(req.params.id);
+    if (!result) return sendMissing(res, "QUESTION_PAPER_NOT_FOUND");
+    res.json({ success: true, data: result });
+  } catch (error) {
+    next(error);
+  }
+}
+
 async function listMemberBooks(req, res, next) {
   try {
     res.json({ success: true, data: { books: await service.listBooks({ memberOnly: true }) } });
@@ -165,7 +186,7 @@ async function listMemberChapters(req, res, next) {
 
 async function listMemberQuestionPapers(req, res, next) {
   try {
-    res.json({ success: true, data: { questionPapers: await service.listQuestionPapers(req.query, { memberOnly: true }) } });
+    res.json({ success: true, data: { questionPapers: await service.listQuestionPapers({ ...req.query, memberUserId: req.user._id }, { memberOnly: true }) } });
   } catch (error) {
     next(error);
   }
@@ -174,6 +195,7 @@ async function listMemberQuestionPapers(req, res, next) {
 async function startAttempt(req, res, next) {
   try {
     const result = await service.startAttempt(req.params.id, req.user._id);
+    if (result.error === "EXAM_ALREADY_SUBMITTED") return sendRuleError(res, result.error);
     if (result.error) return sendMissing(res, result.error);
     res.status(201).json({ success: true, data: result });
   } catch (error) {
@@ -210,12 +232,14 @@ module.exports = {
   listAdminQuestions,
   createQuestion,
   updateQuestion,
+  deleteQuestion,
   previewImport,
   commitImport,
   listAdminQuestionPapers,
   createQuestionPaper,
   updateQuestionPaper,
   updateQuestionPaperStatus,
+  deleteQuestionPaper,
   listMemberBooks,
   listMemberChapters,
   listMemberQuestionPapers,

@@ -70,7 +70,7 @@ const importCommitSchema = z.object({
       className: z.string().trim().max(120).optional().or(z.literal("")),
       group: z.string().trim().max(120).optional().or(z.literal("")),
     })
-  ).min(1).max(1000),
+  ).min(1).max(50),
 });
 
 const questionPaperBaseSchema = z.object({
@@ -79,6 +79,7 @@ const questionPaperBaseSchema = z.object({
   chapterIds: z.array(objectId).default([]),
   durationMinutes: z.coerce.number().int().min(1).max(300),
   totalMarks: z.coerce.number().int().min(1).max(1000),
+  passMark: z.coerce.number().int().min(1).max(1000),
   questionIds: z.array(objectId).min(1).max(200),
   availableFrom: z.coerce.date().optional(),
   availableUntil: z.coerce.date().optional(),

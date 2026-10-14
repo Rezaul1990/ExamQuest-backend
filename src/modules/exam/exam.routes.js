@@ -31,12 +31,14 @@ router.patch("/admin/chapters/:id", authorizePermissions(PERMISSIONS.CONTENT_MAN
 router.get("/admin/questions", authorizePermissions(PERMISSIONS.QUESTION_MANAGE), controller.listAdminQuestions);
 router.post("/admin/questions", authorizePermissions(PERMISSIONS.QUESTION_MANAGE), validate(questionSchema), controller.createQuestion);
 router.patch("/admin/questions/:id", authorizePermissions(PERMISSIONS.QUESTION_MANAGE), validate(questionUpdateSchema), controller.updateQuestion);
+router.delete("/admin/questions/:id", authorizePermissions(PERMISSIONS.QUESTION_MANAGE), controller.deleteQuestion);
 router.post("/admin/questions/import/preview", authorizePermissions(PERMISSIONS.QUESTION_MANAGE), validate(importPreviewSchema), controller.previewImport);
 router.post("/admin/questions/import/commit", authorizePermissions(PERMISSIONS.QUESTION_MANAGE), validate(importCommitSchema), controller.commitImport);
 router.get("/admin/question-papers", authorizePermissions(PERMISSIONS.EXAM_MANAGE), controller.listAdminQuestionPapers);
 router.post("/admin/question-papers", authorizePermissions(PERMISSIONS.EXAM_MANAGE), validate(questionPaperSchema), controller.createQuestionPaper);
 router.patch("/admin/question-papers/:id", authorizePermissions(PERMISSIONS.EXAM_MANAGE), validate(questionPaperUpdateSchema), controller.updateQuestionPaper);
 router.post("/admin/question-papers/:id/status", authorizePermissions(PERMISSIONS.EXAM_MANAGE), validate(publishSchema), controller.updateQuestionPaperStatus);
+router.delete("/admin/question-papers/:id", authorizePermissions(PERMISSIONS.EXAM_MANAGE), controller.deleteQuestionPaper);
 
 router.get("/books", authorizePermissions(PERMISSIONS.CONTENT_READ), controller.listMemberBooks);
 router.get("/books/:bookId/chapters", authorizePermissions(PERMISSIONS.CONTENT_READ), controller.listMemberChapters);
