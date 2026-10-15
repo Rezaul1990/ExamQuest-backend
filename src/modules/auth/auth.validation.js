@@ -1,8 +1,10 @@
 const { z } = require("zod");
+const { normalizeAcademicGroup } = require("../academic/academic.constants");
 
 const email = z.string().email().transform((value) => value.trim().toLowerCase());
 const password = z.string().min(10).max(128);
 const token = z.string().min(20).max(300);
+const academicGroup = z.string().trim().transform(normalizeAcademicGroup).refine(Boolean, "Select a valid academic group");
 
 const registerSchema = z
   .object({
@@ -12,8 +14,9 @@ const registerSchema = z
     password,
     confirmPassword: z.string().min(10).max(128).optional(),
     educationLevel: z.enum(["SSC", "HSC"]),
-    className: z.string().trim().max(80).optional(),
-    group: z.string().trim().max(80).optional(),
+    className: z.string().trim().min(1).max(80),
+    group: academicGroup,
+    academicYear: z.coerce.number().int().min(2000).max(2100),
     dateOfBirth: z.coerce.date().optional(),
     parent: z.object({
       name: z.string().trim().min(2).max(120),
@@ -67,6 +70,7 @@ const staffCreateSchema = z.object({
   email,
   password,
   permissions: z.array(permissionEnum).default([]),
+  bookIds: z.array(z.string().regex(/^[a-f\d]{24}$/i)).max(300).default([]),
 });
 const acceptStaffInviteSchema = z.object({ token, password });
 const userStatusSchema = z.object({ accountStatus: z.enum(["active", "suspended"]) });
@@ -100,3 +104,5 @@ module.exports = {
   acceptStaffInviteSchema,
   userStatusSchema,
 };
+
+module.exports.staffScopeSchema = z.object({ bookIds: z.array(z.string().regex(/^[a-f\d]{24}$/i)).max(300) });

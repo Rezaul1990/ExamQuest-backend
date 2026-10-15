@@ -2,11 +2,12 @@ const express = require("express");
 const controller = require("./admin.controller");
 const { authenticate, authorizePermissions } = require("../../middleware/authenticate");
 const { PERMISSIONS } = require("../auth/auth.constants");
-const { validate, staffCreateSchema, staffInviteSchema, userStatusSchema } = require("../auth/auth.validation");
+const { validate, staffScopeSchema, staffCreateSchema, staffInviteSchema, userStatusSchema } = require("../auth/auth.validation");
 
 const router = express.Router();
 
 router.use(authenticate);
+router.patch("/staff/:id/scope", authorizePermissions(PERMISSIONS.STAFF_INVITE), validate(staffScopeSchema), controller.updateStaffScope);
 router.post("/staff", authorizePermissions(PERMISSIONS.STAFF_INVITE), validate(staffCreateSchema), controller.createStaffAccount);
 router.post("/staff/invite", authorizePermissions(PERMISSIONS.STAFF_INVITE), validate(staffInviteSchema), controller.createStaffInvite);
 router.get("/staff/invites", authorizePermissions(PERMISSIONS.STAFF_INVITE), controller.listInvites);

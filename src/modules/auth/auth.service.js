@@ -6,6 +6,7 @@ const { normalizeEmail, hashPassword, verifyPassword, generateOpaqueToken, hashT
 const { issueAccessToken, createRefreshTokenRecord } = require("./auth.tokens");
 const { buildLink, sendMail } = require("./auth.mailer");
 const { audit } = require("./auth.audit");
+const { normalizeAcademicGroup, normalizeClassName } = require("../academic/academic.constants");
 
 const genericForgotResponse = "If an account exists for this email, a password reset link has been sent.";
 
@@ -56,8 +57,9 @@ async function registerMember(body) {
     passwordHash: await hashPassword(body.password),
     role: ROLES.MEMBER,
     educationLevel: body.educationLevel,
-    className: body.className,
-    group: body.group,
+    className: normalizeClassName(body.className),
+    group: normalizeAcademicGroup(body.group),
+    academicYear: body.academicYear,
     dateOfBirth: body.dateOfBirth,
     parent: body.parent,
     accountStatus: ACCOUNT_STATUS.ACTIVE,

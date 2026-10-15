@@ -14,7 +14,9 @@ function sanitizeStaffPermissions(permissions) {
 
 async function createStaffAccount(req, res, next) {
   try {
-    const { name, email, password, permissions } = req.validatedBody;
+    const { name, email, password, permissions, bookIds } = req.validatedBody;
+    const { Book } = require("../exam/exam.models");
+    if (await Book.countDocuments({ _id: { $in: bookIds }, status: { $ne: "archived" } }) !== new Set(bookIds).size) return res.status(422).json({ success: false, error: "INVALID_BOOK_SCOPE" });
     const grantedPermissions = sanitizeStaffPermissions(permissions);
     let staff = await User.findOne({ email }).select("+passwordHash");
     if (staff && staff.role !== ROLES.STAFF) {
@@ -27,6 +29,7 @@ async function createStaffAccount(req, res, next) {
         passwordHash: await hashPassword(password),
         role: ROLES.STAFF,
         permissions: grantedPermissions,
+        bookIds,
         accountStatus: ACCOUNT_STATUS.ACTIVE,
         emailVerified: true,
         emailVerifiedAt: new Date(),
@@ -35,6 +38,7 @@ async function createStaffAccount(req, res, next) {
       staff.name = name;
       staff.passwordHash = await hashPassword(password);
       staff.permissions = grantedPermissions;
+      staff.bookIds = bookIds;
       staff.accountStatus = ACCOUNT_STATUS.ACTIVE;
       staff.emailVerified = true;
       staff.emailVerifiedAt = staff.emailVerifiedAt || new Date();
@@ -45,7 +49,7 @@ async function createStaffAccount(req, res, next) {
     await audit("ADMIN_CREATED_STAFF_ACCOUNT", {
       actorUserId: req.user._id,
       targetUserId: staff._id,
-      metadata: { permissions: grantedPermissions },
+      metadata: { permissions: grantedPermissions, bookIds },
     });
     res.status(201).json({ success: true, data: { user: staff.toSafeJSON() } });
   } catch (error) {
@@ -183,3 +187,15 @@ function serializeInvite(invite) {
 }
 
 module.exports = { createStaffAccount, createStaffInvite, listInvites, regenerateInvite, revokeInvite, listUsers, updateUserStatus, revokeUserSessions };
+
+async function updateStaffScope(req, res, next) { try {
+  const { Book } = require('../exam/exam.models');
+  const bookIds = [...new Set(req.validatedBody.bookIds)];
+  if (await Book.countDocuments({ _id: { $in: bookIds }, status: { $ne: 'archived' } }) !== bookIds.length) return res.status(422).json({ success: false, error: 'INVALID_BOOK_SCOPE' });
+  const staff = await User.findOneAndUpdate({ _id: req.params.id, role: 'STAFF' }, { $set: { bookIds }, $inc: { authVersion: 1 } }, { new: true });
+  if (!staff) return res.status(404).json({ success: false, error: 'STAFF_NOT_FOUND' });
+  await AuthSession.updateMany({ userId: staff._id, revokedAt: null }, { $set: { revokedAt: new Date(), revokeReason: 'staff_scope_updated' } });
+  await audit('STAFF_SCOPE_UPDATED', { actorUserId: req.user._id, targetUserId: staff._id, metadata: { bookIds } });
+  res.json({ success: true, data: { user: staff.toSafeJSON() } });
+} catch (error) { next(error); } }
+module.exports.updateStaffScope = updateStaffScope;

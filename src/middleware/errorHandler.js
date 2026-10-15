@@ -6,9 +6,9 @@ function errorHandler(error, req, res, next) {
   const status = error.statusCode || 500;
   const payload = {
     success: false,
-    error: status >= 500 ? "INTERNAL_ERROR" : error.code || "REQUEST_ERROR",
+    error: status >= 500 && !["EXAM_STORAGE_NOT_READY", "SUBMISSION_UNCONFIRMED"].includes(error.code) ? "INTERNAL_ERROR" : error.code || "REQUEST_ERROR",
   };
-  if (process.env.NODE_ENV !== "production" && status >= 500) {
+  if (process.env.NODE_ENV !== "production" && status >= 500 && !["EXAM_STORAGE_NOT_READY", "SUBMISSION_UNCONFIRMED"].includes(error.code)) {
     payload.message = error.message;
   }
   res.status(status).json(payload);
