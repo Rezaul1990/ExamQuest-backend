@@ -85,8 +85,15 @@ async function checkDatabase(preview, actor) {
   // Match normalized labels in memory, including legacy aliases; never invent taxonomy.
   const books = await Book.find({ status: { $ne: "archived" }, ...scopedBooks(actor) });
   const bookMap = new Map();
-  for (const book of books) { const k = bookKey(book); bookMap.set(k, [...(bookMap.get(k) || []), book]); }
-  const relevantBooks = books.filter((book) => preview.rows.some((row) => bookKey(row.data) === bookKey(book)));
+  for (const book of books) {
+    const groups = new Set((book.eligibleGroups?.length ? book.eligibleGroups : [book.group]).map(normalizeAcademicGroup).filter(Boolean));
+    for (const group of groups) {
+      const k = bookKey({ title: book.title, subject: book.subject, className: book.className, group });
+      bookMap.set(k, [...(bookMap.get(k) || []), book]);
+    }
+  }
+  const relevantIds = new Set(preview.rows.flatMap((row) => (bookMap.get(bookKey(row.data)) || []).map((book) => String(book._id))));
+  const relevantBooks = books.filter((book) => relevantIds.has(String(book._id)));
   const chapters = relevantBooks.length ? await Chapter.find({ bookId: { $in: relevantBooks.map((book) => book._id) }, status: { $ne: "archived" } }) : [];
   const questions = chapters.length ? await Question.find({ chapterId: { $in: chapters.map((chapter) => chapter._id) } }) : [];
   const references = new Map();

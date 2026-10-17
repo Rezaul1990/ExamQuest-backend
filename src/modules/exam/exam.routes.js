@@ -1,6 +1,6 @@
 const express = require("express");
-const { authenticate, authorizePermissions } = require("../../middleware/authenticate");
-const { PERMISSIONS } = require("../auth/auth.constants");
+const { authenticate, authorizePermissions, authorizeRoles } = require("../../middleware/authenticate");
+const { PERMISSIONS, ROLES } = require("../auth/auth.constants");
 const controller = require("./exam.controller");
 const {
   validate,
@@ -21,6 +21,7 @@ const {
 const router = express.Router();
 
 router.use(authenticate);
+router.use('/admin', authorizeRoles(ROLES.ADMIN, ROLES.STAFF));
 router.use("/admin", require("./exam.scope").enforceContentScope);
 router.get('/admin/question-analytics', require('./exam.bank-controller').adminOnly, require('./exam.bank-controller').analytics);
 

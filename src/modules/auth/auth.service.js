@@ -212,6 +212,7 @@ async function changePassword(user, currentPassword, newPassword) {
   }
   fullUser.passwordHash = await hashPassword(newPassword);
   fullUser.passwordChangedAt = new Date();
+  fullUser.forcePasswordChange = false;
   fullUser.authVersion += 1;
   await fullUser.save();
   await revokeAllSessions(fullUser._id, "password_changed");

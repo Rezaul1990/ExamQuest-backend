@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "main": "index.js",
   "scripts": {
-    "test": "node --test tests/csv-import.test.js tests/paper-authoring.test.js tests/exam-security.test.js tests/exam-polish.test.js tests/release.test.js",
+    "test": "node --test tests/csv-import.test.js tests/paper-authoring.test.js tests/exam-security.test.js tests/exam-polish.test.js tests/release.test.js tests/profile-security.test.js",
     "release:preflight": "node src/scripts/releasePreflight.js",
     "start": "node src/server.js",
     "dev": "nodemon src/server.js",

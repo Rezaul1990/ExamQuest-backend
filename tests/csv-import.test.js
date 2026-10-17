@@ -72,6 +72,31 @@ test('disposable MongoDB CSV and API integration', async (t) => {
       const result=await previewImport(csv([edited]),[25]);assert.equal(result.validCount,1);
       const commit=await commitImport(result.validRows,actor,[25]);assert.equal(commit.questions[0].text,edited.question);
     });
+    await t.test('shared books match every eligible group; duplicate identity stays within the book and chapter', async () => {
+      const shared = await Book.create({ title: 'Bangla 1st Paper', subject: 'Bangla', className: 'HSC', group: 'Science', eligibleGroups: ['Science', 'Humanities', 'BusinessStudies'], createdByUserId: actor });
+      const first = await Chapter.create({ bookId: shared._id, title: 'অপরিচিতা', createdByUserId: actor });
+      const second = await Chapter.create({ bookId: shared._id, title: 'Another chapter', createdByUserId: actor });
+      const input = { ...row('অপরিচিতা গল্পের কথক কে?'), book: shared.title, subject: 'Bangla', chapter: first.title, group: 'Arts' };
+      for (const group of ['Arts', 'Humanities', 'Science', 'Commerce', 'BusinessStudies']) {
+        const preview = await previewImport(csv([{ ...input, group }]), undefined, { role: 'ADMIN' });
+        assert.equal(preview.validCount, 1, group);
+        assert.equal(preview.duplicateCount, 0);
+      }
+      const receipt = await commitImport([input], actor, undefined, { role: 'ADMIN' });
+      assert.equal(receipt.importedCount, 1);
+      for (const group of ['Science', 'Arts']) {
+        assert.equal((await previewImport(csv([{ ...input, group }]))).duplicateCount, 1);
+      }
+      assert.equal((await previewImport(csv([{ ...input, question: 'A different question in the same chapter' }]))).validCount, 1);
+      assert.equal((await previewImport(csv([{ ...input, chapter: second.title }]))).validCount, 1);
+      await Chapter.create({ bookId: book._id, title: first.title, createdByUserId: actor });
+      assert.equal((await previewImport(csv([{ ...input, book: book.title, subject: book.subject, group: 'Science' }]))).validCount, 1);
+      assert.equal((await previewImport(csv([{ ...input, question: 'Scoped question' }]), undefined, { role: 'STAFF', bookIds: [] })).validCount, 0);
+      await Book.updateOne({ _id: shared._id }, { $set: { eligibleGroups: ['Science'] } });
+      const denied = await previewImport(csv([{ ...input, question: 'Ineligible audience question' }]));
+      assert.equal(denied.validCount, 0);
+      assert.equal(denied.duplicateCount, 0);
+    });
     await t.test('completed paper hiding/start guard remains intact', async () => {
       const q=await Question.findOne();
       const paper=await QuestionPaper.create({ title:'Regression paper',bookId:book._id,chapterIds:[chapter._id],eligibleGroups:['Science'],durationMinutes:20,totalMarks:1,passMark:1,questions:[{questionId:q._id,marks:1}],status:'published',createdByUserId:actor });

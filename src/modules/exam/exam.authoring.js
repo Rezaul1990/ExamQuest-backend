@@ -38,7 +38,7 @@ async function validateSelection(payload, actor) {
   const questions = await Question.find({ _id: { $in: ids }, status: 'active' }).select('+correctOption');
   if (questions.length !== ids.length) return { error: 'QUESTION_SELECTION_INVALID' };
   if (questions.some((q) => String(q.bookId) !== String(book._id))) return { error: 'QUESTION_BOOK_MISMATCH' };
-  if (questions.some((q) => !approved(q))) return { error: 'QUESTION_APPROVAL_REQUIRED' };
+  if (actor?.role !== 'ADMIN' && questions.some((q) => !approved(q))) return { error: 'QUESTION_APPROVAL_REQUIRED' };
   const chapterIds = payload.chapterIds?.length ? payload.chapterIds.map(String) : [...new Set(questions.map((q) => String(q.chapterId)))];
   if (new Set(chapterIds).size !== chapterIds.length) return { error: 'CHAPTER_SELECTION_INVALID' };
   const chapters = await Chapter.find({ _id: { $in: chapterIds }, bookId: book._id, status: { $ne: 'archived' } });
@@ -67,7 +67,8 @@ async function paperWrite(promise) {
 }
 
 async function createQuestionPaper(payload, actor) {
-  if (payload.status && payload.status !== 'draft') return { error: 'PAPER_REVIEW_REQUIRED' };
+  const directPublish = actor?.role === 'ADMIN' && payload.status === 'published';
+  if (payload.status && payload.status !== 'draft' && !directPublish) return { error: 'PAPER_REVIEW_REQUIRED' };
   const selection = await validateSelection(payload, actor);
   if (selection.error) return selection;
   const paper = await paperWrite(QuestionPaper.create({
@@ -75,10 +76,12 @@ async function createQuestionPaper(payload, actor) {
     durationMinutes: payload.durationMinutes, totalMarks: payload.totalMarks, passMark: payload.passMark,
     availableFrom: payload.availableFrom, availableUntil: payload.availableUntil,
     questions: selection.questions.map((q) => ({ questionId: q._id, marks: payload.totalMarks / selection.questions.length })),
-    status: 'draft', reviewStatus: 'draft', createdByUserId: actorId(actor),
+    status: directPublish ? 'published' : 'draft', reviewStatus: directPublish ? 'approved' : 'draft', createdByUserId: actorId(actor),
+    ...(directPublish ? snapshots(selection.questions, payload.totalMarks, selection.book) : {}),
   }));
   if (paper.error) return paper;
   await audit('PAPER_CREATED', { actorUserId: actorId(actor), metadata: { paperId: String(paper._id), bookId: String(paper.bookId) } });
+  if (directPublish) await audit('PAPER_PUBLISHED', { actorUserId: actorId(actor), metadata: { paperId: String(paper._id), approvalMode: 'admin_direct' } });
   return { paper: serializePaper(paper, undefined, selection.book) };
 }
 
@@ -99,9 +102,9 @@ async function updateQuestionPaper(id, payload, actor) {
   if (selection.error) return selection;
   let update;
   if (statusOnly && payload.status === 'published') {
-    if (current.reviewStatus !== 'approved') return { error: 'PAPER_REVIEW_REQUIRED' };
-    if (current.reviewDigest !== selectionDigest(selection)) return { error: 'PAPER_CONTENT_CHANGED_REVIEW_REQUIRED' };
-    update = { status: 'published', ...snapshots(selection.questions, current.totalMarks, selection.book) };
+    if (actor?.role !== 'ADMIN' && current.reviewStatus !== 'approved') return { error: 'PAPER_REVIEW_REQUIRED' };
+    if (actor?.role !== 'ADMIN' && current.reviewDigest !== selectionDigest(selection)) return { error: 'PAPER_CONTENT_CHANGED_REVIEW_REQUIRED' };
+    update = { status: 'published', reviewStatus: 'approved', ...snapshots(selection.questions, current.totalMarks, selection.book) };
   } else {
     if (payload.status && payload.status !== 'draft') return { error: 'PAPER_REVIEW_REQUIRED' };
     update = {
@@ -154,7 +157,7 @@ async function generateQuestions(payload, actor) {
   if (!book.className || !payload.eligibleGroups.length || payload.eligibleGroups.some((group) => !groupsFor(book).includes(group))) return { error: 'PAPER_GROUP_MAPPING_INVALID' };
   const chapters = await Chapter.find({ _id: { $in: payload.chapterIds }, bookId: book._id, status: { $ne: 'archived' } });
   if (chapters.length !== payload.chapterIds.length) return { error: 'CHAPTER_SELECTION_INVALID' };
-  const candidates = await Question.find({ bookId: book._id, chapterId: { $in: payload.chapterIds }, status: 'active', ...approvedQuery, ...(payload.difficulty ? { difficulty: payload.difficulty } : {}) });
+  const candidates = await Question.find({ bookId: book._id, chapterId: { $in: payload.chapterIds }, status: 'active', ...(actor?.role === 'ADMIN' ? {} : approvedQuery), ...(payload.difficulty ? { difficulty: payload.difficulty } : {}) });
   const papers = await QuestionPaper.find({ bookId: book._id }).select('questions');
   const usage = new Map();
   papers.forEach((paper) => paper.questions.forEach((q) => usage.set(String(q.questionId), (usage.get(String(q.questionId)) || 0) + 1)));
@@ -218,8 +221,13 @@ module.exports.reviewQuestion = reviewQuestion;
 
 async function listCandidates(bookId, actor) {
   if (!mongoose.isValidObjectId(bookId) || !canAccessBook(actor, bookId)) return { error: 'RESOURCE_SCOPE_FORBIDDEN' };
-  const questions = await Question.find({ bookId, status: 'active', ...approvedQuery }).sort({ createdAt: -1 }).limit(1000);
-  return { questions: questions.map((q) => ({ id: String(q._id), bookId: String(q.bookId), chapterId: String(q.chapterId), text: q.text, options: q.options.map((o) => ({ key: o.key, text: o.text })), difficulty: q.difficulty, status: q.status, reviewStatus: 'approved', revision: q.__v || 0 })), limit: 1000 };
+  const questions = await Question.find({ bookId, status: 'active', ...(actor?.role === 'ADMIN' ? {} : approvedQuery) }).sort({ createdAt: -1 }).limit(1000);
+  const counts = await Question.aggregate([
+    { $match: { bookId: new mongoose.Types.ObjectId(bookId), status: 'active' } },
+    { $group: { _id: { chapterId: '$chapterId', difficulty: '$difficulty' }, total: { $sum: 1 }, approved: { $sum: { $cond: [{ $or: [{ $eq: ['$reviewStatus', 'approved'] }, { $eq: [{ $type: '$reviewStatus' }, 'missing'] }] }, 1, 0] } } } },
+  ]);
+  const availability = counts.map((row) => ({ chapterId: String(row._id.chapterId), difficulty: row._id.difficulty, total: row.total, approved: row.approved, pendingReview: row.total - row.approved }));
+  return { questions: questions.map((q) => ({ id: String(q._id), bookId: String(q.bookId), chapterId: String(q.chapterId), text: q.text, options: q.options.map((o) => ({ key: o.key, text: o.text })), difficulty: q.difficulty, status: q.status, reviewStatus: approved(q) ? 'approved' : q.reviewStatus, revision: q.__v || 0 })), limit: 1000, availability };
 }
 module.exports.listCandidates = listCandidates;
 

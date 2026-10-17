@@ -44,4 +44,10 @@ function authorizePermissions(...permissions) {
   };
 }
 
-module.exports = { authenticate, authorizePermissions };
+function authorizeRoles(...roles) {
+  return (req, res, next) => roles.includes(req.user?.role)
+    ? next()
+    : res.status(403).json({ success: false, error: 'FORBIDDEN' });
+}
+
+module.exports = { authenticate, authorizePermissions, authorizeRoles };
