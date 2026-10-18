@@ -23,6 +23,18 @@ const router = express.Router();
 router.use(authenticate);
 router.use('/admin', authorizeRoles(ROLES.ADMIN, ROLES.STAFF));
 router.use("/admin", require("./exam.scope").enforceContentScope);
+const learning = require('./exam.learning-controller');
+const { authLimiter } = require('../../middleware/rateLimits');
+router.get('/admin/student-reports', authorizeRoles(ROLES.ADMIN), learning.reports);
+router.patch('/admin/student-reports/:id', authorizeRoles(ROLES.ADMIN), learning.resolve);
+router.post('/admin/question-papers/:id/release-results', authorizeRoles(ROLES.ADMIN), learning.release);
+router.use('/learning', authorizeRoles(ROLES.MEMBER));
+router.get('/learning', learning.overview);
+router.get('/learning/discovery', learning.discovery);
+router.put('/learning/papers/:id/reminder', learning.reminder);
+router.get('/learning/attempts/:id/review', learning.review);
+router.put('/learning/attempts/:id/questions/:questionId/bookmark', learning.bookmark);
+router.put('/learning/attempts/:id/questions/:questionId/report', authLimiter, learning.report);
 router.get('/admin/question-analytics', require('./exam.bank-controller').adminOnly, require('./exam.bank-controller').analytics);
 
 router.get("/admin/books", authorizePermissions(PERMISSIONS.CONTENT_READ), controller.listAdminBooks);

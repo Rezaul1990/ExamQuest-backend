@@ -31,6 +31,8 @@ connectDatabase()
   .then(async () => {
     startupStage = "exam storage";
     await ensureExamStorage();
+    startupStage = "learning storage";
+    await require('./modules/exam/exam.learning-models').ensureLearningStorage();
     if (stopping) return;
     server = app.listen(PORT, () => {
       stopWorker = startExpiryWorker();

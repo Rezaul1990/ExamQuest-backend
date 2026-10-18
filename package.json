@@ -3,16 +3,17 @@
   "version": "1.0.0",
   "main": "index.js",
   "scripts": {
-    "test": "node --test tests/csv-import.test.js tests/paper-authoring.test.js tests/exam-security.test.js tests/exam-polish.test.js tests/release.test.js tests/profile-security.test.js",
+    "test": "node --test tests/csv-import.test.js tests/paper-authoring.test.js tests/exam-security.test.js tests/exam-polish.test.js tests/release.test.js tests/profile-security.test.js tests/student-experience.test.js",
     "release:preflight": "node src/scripts/releasePreflight.js",
     "start": "node src/server.js",
     "dev": "nodemon src/server.js",
     "seed:admin": "node src/scripts/seedAdmin.js",
-    "check": "node --check src/app.js && node --check src/server.js && node --check src/modules/auth/auth.controller.js && node --check src/modules/admin/admin.controller.js && node --check src/modules/exam/exam.models.js && node --check src/modules/exam/exam.import.js && node --check src/modules/exam/exam.authoring.js && node --check src/modules/exam/exam.scope.js && node --check src/modules/exam/exam.presentation.js && node --check src/modules/exam/exam.bank.js && node --check src/modules/exam/exam.bank-controller.js && node --check src/modules/exam/exam.validation.js && node --check src/modules/exam/exam.service.js && node --check src/modules/exam/exam.member.js && node --check src/modules/exam/exam.member-rules.js && node --check src/middleware/errorHandler.js && node --check src/modules/exam/exam.controller.js && node --check src/modules/exam/exam.routes.js && node --check src/scripts/seedAdmin.js",
+    "check": "node --check src/app.js && node --check src/server.js && node --check src/modules/auth/auth.controller.js && node --check src/modules/admin/admin.controller.js && node --check src/modules/exam/exam.models.js && node --check src/modules/exam/exam.import.js && node --check src/modules/exam/exam.authoring.js && node --check src/modules/exam/exam.scope.js && node --check src/modules/exam/exam.presentation.js && node --check src/modules/exam/exam.bank.js && node --check src/modules/exam/exam.bank-controller.js && node --check src/modules/exam/exam.validation.js && node --check src/modules/exam/exam.service.js && node --check src/modules/exam/exam.member.js && node --check src/modules/exam/exam.member-rules.js && node --check src/middleware/errorHandler.js && node --check src/modules/exam/exam.controller.js && node --check src/modules/exam/exam.routes.js && node --check src/scripts/seedAdmin.js && node --check src/modules/exam/exam.learning.js && node --check src/modules/exam/exam.learning-models.js && node --check src/modules/exam/exam.learning-controller.js",
     "test:csv": "node --test tests/csv-import.test.js",
     "test:papers": "node --test tests/paper-authoring.test.js",
     "test:exam": "node --test tests/exam-security.test.js",
-    "test:polish": "node --test tests/exam-polish.test.js"
+    "test:polish": "node --test tests/exam-polish.test.js",
+    "test:student": "node --test tests/student-experience.test.js"
   },
   "keywords": [],
   "author": "",

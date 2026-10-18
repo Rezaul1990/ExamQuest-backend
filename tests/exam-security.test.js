@@ -178,7 +178,9 @@ test('Phase 4 standalone MongoDB + HTTP exam security',async(t)=>{
       const who=await identity(),p=await paper(),a=await start(p,who);
       for(const response of [a,(await request('/attempts/'+a.id,undefined,who)).data,(await request('/attempts',undefined,who)).data])for(const field of ['correctOption','PRIVATE_GRADING_SECRET','isCorrect','marksAwarded','answerKey'])assert.ok(!JSON.stringify(response).includes(field),field);
       await submit(a,who);await require('../src/modules/exam/exam.authoring').deleteQuestionPaper(String(p._id),creator);
-      const result=await request('/attempts/'+a.id,undefined,who);assert.equal(result.status,200);assert.equal(result.data.attempt.score,2);assert.ok(result.data.attempt.answers.every((answer)=>answer.correctOption==='A'));
+      const result=await request('/attempts/'+a.id,undefined,who);assert.equal(result.status,200);assert.equal(result.data.attempt.score,2);assert.ok(result.data.attempt.answers.every((answer)=>answer.correctOption===undefined));
+      await QuestionPaper.updateOne({_id:p._id},{$set:{availableUntil:new Date(Date.now()-21*60000)}});
+      assert.ok((await request('/attempts/'+a.id,undefined,who)).data.attempt.answers.every((answer)=>answer.correctOption==='A'));
       await User.updateOne({_id:who.user._id},{$set:{group:'Humanities'}});
       assert.equal((await request('/attempts/'+a.id,undefined,who)).status,403);
       assert.equal((await request('/attempts',undefined,who)).data.attempts.length,0);

@@ -122,7 +122,7 @@ const paperReviewSchema = z.object({ reviewStatus: z.enum(["reviewed", "approved
 const questionReviewSchema = z.object({ reviewStatus: z.enum(["reviewed", "approved"]), revision: z.number().int().min(0) });
 const answerList = z.array(z.object({ questionId: objectId, selectedOption: optionKey }).strict()).max(200);
 const submitAttemptSchema = z.object({ answers: answerList.default([]), reason: z.enum(['manual','timer_expired']).default('manual') }).strict();
-const saveAnswersSchema = z.object({ answers: answerList, revision: z.number().int().min(0) }).strict();
+const saveAnswersSchema = z.object({ answers: answerList, revision: z.number().int().min(0), reviewQuestionIds: z.array(objectId).max(200).refine((ids) => new Set(ids).size === ids.length).optional() }).strict();
 
 function validate(schema) {
   return (req, res, next) => {

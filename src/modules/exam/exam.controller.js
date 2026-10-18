@@ -287,7 +287,7 @@ module.exports.getAttempt = async (req,res,next) => { try {
   res.json({success:true,data:result});
 } catch(error){next(error);} };
 module.exports.saveAnswers = async (req,res,next) => { try {
-  const result = await memberExams.saveAnswers(req.params.id,req.user._id,req.validatedBody.answers,req.validatedBody.revision);
+  const result = await memberExams.saveAnswers(req.params.id,req.user._id,req.validatedBody.answers,req.validatedBody.revision,req.validatedBody.reviewQuestionIds);
   if(result.error)return sendExamError(res,result.error);
   res.json({success:true,data:result});
 } catch(error){next(error);} };

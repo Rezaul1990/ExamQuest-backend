@@ -78,6 +78,9 @@ async function submittedRecord(attempt,paper) {
   return null;
 }
 async function startAttempt(paperId,memberUserId) {
+  // Capture before async reads: a start racing an Admin close must not gain a
+  // fresh duration after closing and outlive the answer-release safety window.
+  const startedAt=new Date();
   const access=await memberRecord(memberUserId);if(access.error)return access;
   if(!validId(paperId))return {error:'QUESTION_PAPER_NOT_FOUND'};
   let paper=await QuestionPaper.findOne({_id:paperId,status:'published'}).select('+answerKey');
@@ -96,7 +99,6 @@ async function startAttempt(paperId,memberUserId) {
     catch(error){if(error.code!==11000)throw error;attempt=await ExamAttempt.findOne({activeKey});}
   }
   if(!attempt){
-    const startedAt=new Date();
     try { attempt=await ExamAttempt.findOneAndUpdate({activeKey},{$setOnInsert:{activeKey,memberUserId,questionPaperId:paperId,total:paper.totalMarks,startedAt,expiresAt:new Date(startedAt.getTime()+paper.durationMinutes*60000),paperSnapshotVersion:paper.snapshotVersion,presentation:createPresentation(paper),answerRevision:0,status:'in_progress'}},{upsert:true,new:true,setDefaultsOnInsert:true}); }
     catch(error){if(error.code!==11000)throw error;attempt=await ExamAttempt.findOne({activeKey});}
   }
@@ -165,7 +167,7 @@ async function getAttempt(id,memberUserId){
   paper=await ensurePaperSnapshot(paper);if(!paper)return {error:'PAPER_SNAPSHOT_UNAVAILABLE'};
   return {attempt:serializeAttempt(attempt,paper,presentQuestions(paper,attempt)),paper:serializePaper(paper,undefined,book)};
 }
-async function saveAnswers(id,memberUserId,answers,revision){
+async function saveAnswers(id,memberUserId,answers,revision,reviewQuestionIds){
   const context=await ownedAttempt(id,memberUserId);if(context.error)return context;
   let {attempt,paper,book}=context;
   const submitted=await submittedRecord(attempt,paper);if(submitted)return submitted;
@@ -175,8 +177,9 @@ async function saveAnswers(id,memberUserId,answers,revision){
   attempt=await adoptDeadline(attempt,paper);
   if(attempt.expiresAt<=new Date())return {error:'ATTEMPT_EXPIRED'};
   if(!validateAnswers(answers,paper))return {error:'INVALID_ATTEMPT_ANSWERS'};
+  if(reviewQuestionIds?.some((id)=>!paper.questionSnapshots.some((q)=>String(q.questionId)===String(id))))return {error:'INVALID_ATTEMPT_ANSWERS'};
   const filter={_id:id,memberUserId,status:'in_progress',expiresAt:{$gt:new Date()},$expr:{$gt:['$expiresAt','$$NOW']},...(revision===0?{$or:[{answerRevision:0},{answerRevision:{$exists:false}}]}:{answerRevision:revision})};
-  const saved=await ExamAttempt.findOneAndUpdate(filter,{$set:{answers},$inc:{answerRevision:1}},{new:true,runValidators:true});
+  const saved=await ExamAttempt.findOneAndUpdate(filter,{$set:{answers,...(reviewQuestionIds?{reviewQuestionIds}:{})},$inc:{answerRevision:1}},{new:true,runValidators:true});
   if(!saved)return {error:'ATTEMPT_CHANGED_RELOAD'};
   return {attempt:serializeAttempt(saved,paper)};
 }

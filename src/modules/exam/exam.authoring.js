@@ -21,6 +21,7 @@ function serializePaper(paper, questionCount, book) {
     status: paper.status, reviewStatus: paper.reviewStatus || 'draft', snapshotVersion: paper.snapshotVersion,
     revision: paper.__v ?? 0, availabilityStatus: paper.status === 'published' && paper.availableFrom > new Date() ? 'scheduled' : paper.status,
     createdAt: paper.createdAt, updatedAt: paper.updatedAt,
+    resultsReleaseScheduledAt: paper.resultsReleaseScheduledAt,
   };
 }
 
@@ -54,7 +55,7 @@ function snapshots(questions, totalMarks, book) {
   return {
     snapshotVersion: 1,
     academicContext: { className: book.className, subject: book.subject, bookTitle: book.title },
-    questionSnapshots: questions.map((q) => ({ questionId: q._id, text: q.text, options: q.options.map((option) => ({ key: option.key, text: option.text })), difficulty: q.difficulty, marks: totalMarks / questions.length })),
+    questionSnapshots: questions.map((q) => ({ questionId: q._id, chapterId: q.chapterId, text: q.text, options: q.options.map((option) => ({ key: option.key, text: option.text })), difficulty: q.difficulty, marks: totalMarks / questions.length })),
     answerKey: questions.map((q) => ({ questionId: q._id, correctOption: q.correctOption, explanation: q.explanation || '' })),
   };
 }

@@ -75,6 +75,7 @@ const snapshotSchema = new mongoose.Schema({
   text: { type: String, required: true },
   options: [optionSchema],
   difficulty: String,
+  chapterId: mongoose.Schema.Types.ObjectId,
   marks: Number,
 }, { _id: false });
 const answerKeySchema = new mongoose.Schema({ questionId: mongoose.Schema.Types.ObjectId, correctOption: String, explanation: String }, { _id: false });
@@ -96,6 +97,7 @@ const questionPaperSchema = new mongoose.Schema(
     answerKey: { type: [answerKeySchema], select: false, default: undefined },
     academicContext: { className: String, subject: String, bookTitle: String },
     originalTitle: String,
+    resultsReleaseScheduledAt: Date,
     availableFrom: { type: Date, index: true },
     availableUntil: { type: Date, index: true },
     status: { type: String, enum: STATUS, default: "draft", index: true },
@@ -127,6 +129,7 @@ const examAttemptSchema = new mongoose.Schema(
     activeKey: String,
     expiresAt: { type: Date, index: true },
     answerRevision: { type: Number, default: 0 },
+    reviewQuestionIds: [{ type: mongoose.Schema.Types.ObjectId }],
     submissionMode: { type: String, enum: ["manual", "timer_expired"] },
     expiryReason: String,
     score: { type: Number, default: 0 },

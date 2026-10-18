@@ -18,13 +18,22 @@ function midnight(day) {
 function dayBounds(day) { const tomorrow = new Date(Date.parse(day+'T00:00:00Z')+86400000).toISOString().slice(0,10); return { start: midnight(day), end: midnight(tomorrow) }; }
 function serializeAttempt(item, paper, questions = []) {
   const accepted = !!item.attemptId || item.status === 'submitted';
+  const released = accepted && resultsReleased(paper);
   return {
     id: String(item.attemptId || item._id), questionPaperId: String(item.questionPaperId), paperTitle: item.paperTitle || paper?.originalTitle || paper?.title,
     status: accepted ? 'submitted' : item.status, questions,
-    answers: (item.answers || []).map((answer) => accepted ? { questionId: String(answer.questionId), selectedOption: answer.selectedOption, correctOption: answer.correctOption, isCorrect: answer.isCorrect, marksAwarded: answer.marksAwarded } : { questionId: String(answer.questionId), selectedOption: answer.selectedOption }),
+    answers: (item.answers || []).map((answer) => released ? { questionId: String(answer.questionId), selectedOption: answer.selectedOption, correctOption: answer.correctOption, isCorrect: answer.isCorrect, marksAwarded: answer.marksAwarded } : { questionId: String(answer.questionId), selectedOption: answer.selectedOption }),
+    reviewQuestionIds: (item.reviewQuestionIds || []).map(String),
+    reviewAvailable: !!released,
     score: accepted ? item.score : 0, total: item.total, percentage: accepted ? item.percentage : 0,
     startedAt: item.startedAt, expiresAt: item.expiresAt, submittedAt: accepted ? item.submittedAt : undefined,
     serverNow: new Date(), answerRevision: item.answerRevision || 0, submissionMode: item.submissionMode, expiryReason: item.expiryReason,
   };
 }
-module.exports = { eligibleMember, isPaperOpen, dhakaDay, dayBounds, serializeAttempt };
+function resultsReleased(paper, now = new Date()) {
+  // A start immediately before closing can use the full duration. Wait for
+  // that final deadline before exposing reusable answers to other learners.
+  if (!paper?.availableUntil) return false;
+  return new Date(paper.availableUntil).getTime() + paper.durationMinutes * 60000 < now.getTime();
+}
+module.exports = { eligibleMember, isPaperOpen, dhakaDay, dayBounds, serializeAttempt, resultsReleased };
