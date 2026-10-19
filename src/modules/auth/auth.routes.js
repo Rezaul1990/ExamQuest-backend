@@ -1,6 +1,6 @@
 const express = require("express");
 const controller = require("./auth.controller");
-const { authenticate } = require("../../middleware/authenticate");
+const { authenticate, authorizeRoles } = require("../../middleware/authenticate");
 const { authLimiter, loginLimiter, tokenLimiter } = require("../../middleware/rateLimits");
 const {
   validate,
@@ -12,6 +12,7 @@ const {
   resetPasswordSchema,
   changePasswordSchema,
   acceptStaffInviteSchema,
+  academicProfileSchema,
 } = require("./auth.validation");
 
 const router = express.Router();
@@ -25,6 +26,7 @@ router.post("/reset-password", tokenLimiter, validate(resetPasswordSchema), cont
 router.post("/staff-invite/accept", tokenLimiter, validate(acceptStaffInviteSchema), controller.acceptStaffInvite);
 
 router.get("/me", authenticate, controller.me);
+router.patch('/me/academic-profile', authenticate, authorizeRoles('MEMBER'), authLimiter, validate(academicProfileSchema), controller.updateAcademicProfile);
 router.post("/logout", authenticate, controller.logout);
 router.post("/logout-all", authenticate, controller.logoutAll);
 router.post("/change-password", authenticate, validate(changePasswordSchema), controller.changePassword);

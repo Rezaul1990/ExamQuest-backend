@@ -15,14 +15,14 @@ async function upsertUnique(model, filter, update) {
   catch (error) { if (error.code !== 11000) throw error; return model.findOneAndUpdate(filter, update, { new: true, runValidators: true }); }
 }
 async function ownedResult(memberUserId, attemptId) {
-  const user = await member(memberUserId); checkId(attemptId);
+  await member(memberUserId); checkId(attemptId);
   const attempt = await ExamAttempt.findOne({ _id: attemptId, memberUserId });
   const accepted = await ExamSubmission.findOne({ attemptId, memberUserId });
   if (!attempt && !accepted) fail('ATTEMPT_NOT_FOUND', 404);
   const result = accepted || attempt;
   const paper = await QuestionPaper.findById(result.questionPaperId).select('+answerKey');
   const book = paper && await Book.findById(paper.bookId);
-  if (!paper || !eligibleMember(user, paper, book)) fail('QUESTION_PAPER_NOT_ELIGIBLE', 403);
+  if (!paper) fail('QUESTION_PAPER_NOT_FOUND', 404);
   return { result, attempt, paper, book, submitted: !!accepted || attempt?.status === 'submitted' };
 }
 function reviewRows(context) {
@@ -58,7 +58,7 @@ async function setBookmark(memberUserId, attemptId, questionId, enabled) {
   return { enabled };
 }
 async function learningOverview(memberUserId) {
-  const user = await member(memberUserId);
+  await member(memberUserId);
   const [accepted, legacy, bookmarks] = await Promise.all([
     ExamSubmission.find({ memberUserId }).sort({ submittedAt: -1 }).limit(200),
     ExamAttempt.find({ memberUserId, status: 'submitted' }).sort({ submittedAt: -1 }).limit(200),
@@ -67,15 +67,13 @@ async function learningOverview(memberUserId) {
   const records = [...accepted, ...legacy.filter((r) => !accepted.some((a) => String(a.attemptId) === String(r._id)))]
     .sort((a,b) => new Date(b.submittedAt) - new Date(a.submittedAt)).slice(0,200);
   const papers = await QuestionPaper.find({ _id: { $in: records.map((r) => r.questionPaperId) } }).select('+answerKey');
-  const books = await Book.find({ _id: { $in: papers.map((p) => p.bookId) } });
   const attempts = await ExamAttempt.find({ _id: { $in: records.map((r) => r.attemptId || r._id) } });
   const chapters = await Chapter.find({ _id: { $in: papers.flatMap((p) => (p.questionSnapshots || []).map((q) => q.chapterId).filter(Boolean)) } });
   const progress = new Map(), practice = [], seen = new Set(), trend = [];
   const bookmarkKeys = new Set(bookmarks.map((b) => String(b.paperId) + ':' + String(b.questionId)));
   for (const result of records) {
     const paper = papers.find((p) => String(p._id) === String(result.questionPaperId));
-    const book = paper && books.find((b) => String(b._id) === String(paper.bookId));
-    if (!paper || !eligibleMember(user, paper, book)) continue;
+    if (!paper) continue;
     trend.push({ attemptId: String(result.attemptId || result._id), title: result.paperTitle || paper.originalTitle || paper.title, percentage: result.percentage, submittedAt: result.submittedAt || result.updatedAt || result.startedAt });
     // Aggregate performance is available immediately; no per-question key is returned here.
     const resultAnswers = new Map(result.answers.map((answer) => [String(answer.questionId), answer]));

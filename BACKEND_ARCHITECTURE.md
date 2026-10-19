@@ -1,46 +1,35 @@
-# Serviq — backend architecture contract
+# ExamQuest — backend architecture contract
 
-## Style
-**Modular monolith**, feature modules with explicit HTTP/controller → service/use case → repository/data adapter boundaries. Express + TypeScript. Do not create microservices, DDD complexity or layers with no actual responsibility.
+## Current implementation
+Modular Express monolith using Node.js CommonJS JavaScript and Mongoose/MongoDB. Paths below are relative to `backend/` and describe existing files, not a TypeScript migration plan.
 
 ```text
-backend/
-  src/
-    app.ts              # Express composition, middleware, routes
-    server.ts           # start / shutdown
-    config/             # typed env setup
-    modules/
-      example/
-        example.routes.ts
-        example.controller.ts
-        example.service.ts
-        example.repository.ts
-        example.schema.ts
-        example.types.ts
-        __tests__/
-    middleware/
-    shared/
-      errors/
-      http/
-      logging/
-  tests/                # cross-module integration
+src/
+  app.js                    # Express composition, middleware and API mounting
+  server.js                 # database/index readiness, HTTP lifecycle, expiry worker
+  config/env.js             # environment reading/validation
+  db/                       # connection and safe startup diagnostics
+  middleware/               # authentication, rate limits, error translation
+  modules/
+    auth/                   # auth routes/controllers/service/models and helpers
+    admin/                  # staff/admin routes and controller
+    academic/               # canonical academic constants
+    exam/                   # routes/controllers, validation, services and models
+  scripts/                  # explicit seed/preflight entry points
+tests/                      # disposable MongoDB/HTTP and rule regressions
 ```
 
-Illustrative names are **not files to generate in advance**. Add only required modules and artifacts.
-
-## Responsibilities
-- Routes: endpoint registration, middleware orchestration.
-- Controller: parse validated request, call service, format status/response; no DB/business logic.
-- Service/use case: business rules, invariants, authorization checks with trusted identity, orchestration, transactions where needed.
-- Repository: encapsulate Mongoose/MongoDB persistence and query details.
-- Schema: validate request and env; never expose internal models automatically.
-- Shared: cross-cutting implementations only after true reuse.
+## Responsibilities and placement
+- Routes mount middleware, roles/permissions/scope and validation. Controllers adapt HTTP requests/responses.
+- Services and focused use-case modules own business rules and persistence orchestration. Exam use cases include `exam.member.js`, `exam.authoring.js`, `exam.import.js`, `exam.bank.js` and `exam.learning.js`.
+- Existing services/controllers access Mongoose models directly where implemented; there is no mandatory repository folder or TypeScript build layer. Keep additions consistent with nearby source. Introduce a separate adapter only when it has a real responsibility.
+- Validation lives in `*.validation.js` and relevant controller schemas; shared helpers belong near their owning module unless genuinely reused.
+- Do not create placeholder modules, microservices or unrelated architecture conversions.
 
 ## Cross-stack contract
-Version APIs intentionally, document in `../docs/API_CONTRACT.md`, provide explicit errors, auth constraints and example payloads. A feature modifying API must update frontend consumers and corresponding docs/tests unless user explicitly scopes backend-only work.
+Stable mounts are `/api/v1/auth`, `/api/v1/admin`, `/api/v1/exams`; health is `/api/health`. Document contract changes in [API_CONTRACT.md](../docs/API_CONTRACT.md) and coordinate frontend consumers. Naming reconciliation must not rename routes, role/permission identifiers, database collections or token/deep-link identifiers.
 
-## Safety
-Server owns role/resource permission checks, idempotency and race-safe booking rules as relevant. Never trust client-provided price. Structured logging with trace/request ID, redact secrets. Centralized error translation. Separate envs and secure config.
+## Safety and verification
+The server owns authorization, academic eligibility, timing, scoring, quota and immutable snapshots. Preserve existing secret-handling boundaries; production safeguards and outstanding gaps are documented in [security rules](../docs/SECURITY_RULES.md) and project state.
 
-## Tests
-Unit test critical rules, integration test routes/database behavior with isolated test data; contract-test frontend DTO compatibility when possible. Report exact checks, not assumed success.
+Run `npm run check` and `npm test` for configured syntax and disposable MongoDB/HTTP regressions. Never treat these as production/native verification or write to a live database to validate documentation.

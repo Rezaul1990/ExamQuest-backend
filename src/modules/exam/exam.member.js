@@ -57,7 +57,8 @@ async function ownedAttempt(id, memberUserId) {
   const attempt=await ExamAttempt.findOne({_id:id,memberUserId});if(!attempt)return {error:'ATTEMPT_NOT_FOUND'};
   const paper=await QuestionPaper.findById(attempt.questionPaperId).select('+answerKey');
   const book=paper?await Book.findById(paper.bookId):null;
-  if(!paper||!eligibleMember(access.member,paper,book))return {error:'QUESTION_PAPER_NOT_ELIGIBLE'};
+  // Eligibility was checked at start. Owned attempts survive later academic changes.
+  if(!paper)return {error:'QUESTION_PAPER_NOT_FOUND'};
   return {attempt,paper,book,member:access.member};
 }
 async function adoptDeadline(attempt,paper) {
@@ -188,8 +189,7 @@ async function listAttempts(memberUserId){
   const [accepted,legacy]=await Promise.all([ExamSubmission.find({memberUserId}).sort({submittedAt:-1}).limit(100),ExamAttempt.find({memberUserId}).sort({createdAt:-1}).limit(100)]);
   const records=[...accepted,...legacy.filter((item)=>!accepted.some((record)=>String(record.attemptId)===String(item._id)))];
   const papers=await QuestionPaper.find({_id:{$in:records.map((r)=>r.questionPaperId)}});
-  const books=await Book.find({_id:{$in:papers.map((p)=>p.bookId)}});
-  return records.filter((item)=>{const paper=papers.find((p)=>String(p._id)===String(item.questionPaperId));return paper&&eligibleMember(access.member,paper,books.find((b)=>String(b._id)===String(paper.bookId)));}).map((item)=>serializeAttempt(item,papers.find((p)=>String(p._id)===String(item.questionPaperId)))).sort((a,b)=>new Date(b.submittedAt||b.startedAt)-new Date(a.submittedAt||a.startedAt)).slice(0,100);
+  return records.filter((item)=>papers.some((p)=>String(p._id)===String(item.questionPaperId))).map((item)=>serializeAttempt(item,papers.find((p)=>String(p._id)===String(item.questionPaperId)))).sort((a,b)=>new Date(b.submittedAt||b.startedAt)-new Date(a.submittedAt||a.startedAt)).slice(0,100);
 }
 async function sweepExpiredAttempts(){
   const attempts=await ExamAttempt.find({status:'in_progress',expiresAt:{$lte:new Date()}}).sort({expiresAt:1}).limit(25);

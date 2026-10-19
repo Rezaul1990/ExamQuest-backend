@@ -175,7 +175,13 @@ async function forgotPassword(email) {
   if (user) {
     const token = await createSecurityToken(user, "password_reset", 20);
     const link = buildLink("reset-password", token);
-    await sendMail({ to: user.email, subject: "Reset your ExamQuest password", text: `Reset your password: ${link}` });
+    try {
+      await sendMail({ to: user.email, subject: "Reset your ExamQuest password", text: `Reset your password: ${link}` });
+    } catch (error) {
+      if (error.code !== 'MAIL_DELIVERY_FAILED') throw error;
+      // Do not reveal account existence through a recipient-specific SMTP failure.
+      console.warn('[mail] Password recovery delivery failed.');
+    }
   }
   return genericForgotResponse;
 }
@@ -244,7 +250,22 @@ async function acceptStaffInvite(token, password) {
   return user;
 }
 
+async function updateAcademicProfile(user, body) {
+  const fields = ['educationLevel', 'className', 'group', 'academicYear'];
+  const filter = { _id: user._id, role: ROLES.MEMBER, accountStatus: ACCOUNT_STATUS.ACTIVE,
+    ...(body.expectedRevision === 0 ? { $or: [{ academicProfileRevision: 0 }, { academicProfileRevision: { $exists: false } }] } : { academicProfileRevision: body.expectedRevision }) };
+  const updated = await User.findOneAndUpdate(filter, {
+    $set: Object.fromEntries(fields.map((field) => [field, body[field]])), $inc: { academicProfileRevision: 1 },
+  }, { new: true, runValidators: true });
+  if (!updated) { const error = new Error('Academic profile changed; reload before saving'); error.code = 'ACADEMIC_PROFILE_CHANGED'; error.statusCode = 409; throw error; }
+  await audit('ACADEMIC_PROFILE_UPDATED', { actorUserId: user._id, targetUserId: user._id,
+    metadata: { previousRevision: body.expectedRevision, revision: updated.academicProfileRevision,
+      before: Object.fromEntries(fields.map((field) => [field, user[field]])), after: Object.fromEntries(fields.map((field) => [field, updated[field]])) } });
+  return updated;
+}
+
 module.exports = {
+  updateAcademicProfile,
   registerMember,
   verifyEmail,
   login,

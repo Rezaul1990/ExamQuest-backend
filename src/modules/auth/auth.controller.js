@@ -104,4 +104,10 @@ async function acceptStaffInvite(req, res, next) {
   }
 }
 
-module.exports = { register, verifyEmail, login, refresh, me, logout, logoutAll, forgotPassword, resetPassword, changePassword, acceptStaffInvite };
+async function updateAcademicProfile(req, res, next) {
+  try {
+    const user = await authService.updateAcademicProfile(req.user, req.validatedBody);
+    res.json({ success: true, data: { user: user.toSafeJSON() } });
+  } catch (error) { next(error); }
+}
+module.exports = { register, verifyEmail, login, refresh, me, logout, logoutAll, forgotPassword, resetPassword, changePassword, acceptStaffInvite, updateAcademicProfile };

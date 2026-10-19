@@ -157,7 +157,7 @@ test('Phase 4 standalone MongoDB + HTTP exam security',async(t)=>{
       assert.equal(response.error,'EXAM_ALREADY_SUBMITTED');assert.equal(await ExamSubmission.countDocuments({memberUserId:who.user._id}),0);
       assert.equal((await request('/status',undefined,who)).data.used,0);
     });
-    await t.test('cross-group/class and role access denied on list/detail/start/save/resume/submit/history/results',async()=>{
+    await t.test('cross-group/class starts and cross-owner access denied; owned attempts survive academic changes',async()=>{
       const who=await identity(),p=await paper(),a=await start(p,who);
       const outsider=await identity({group:'Humanities'}),wrongClass=await identity({className:'SSC'}),admin=await identity({role:'ADMIN'});
       for(const actor of [outsider,wrongClass]){
@@ -171,8 +171,9 @@ test('Phase 4 standalone MongoDB + HTTP exam security',async(t)=>{
       assert.equal((await request('/books',undefined,admin)).status,403);
       assert.equal((await request('/status',undefined,null)).status,401);
       await User.updateOne({_id:who.user._id},{$set:{group:'Humanities'}});
-      for(const [route,body,method] of [['/attempts/'+a.id,undefined,'GET'],['/attempts/'+a.id+'/answers',{answers:chosen,revision:0},'PUT'],['/attempts/'+a.id+'/submit',{answers:chosen},'POST']])assert.equal((await request(route,body,who,method)).status,403);
-      assert.equal((await request('/attempts',undefined,who)).data.attempts.length,0);
+      for(const [route,body,method] of [['/attempts/'+a.id,undefined,'GET'],['/attempts/'+a.id+'/answers',{answers:chosen,revision:0},'PUT'],['/attempts/'+a.id+'/submit',{answers:chosen},'POST']])assert.equal((await request(route,body,who,method)).status,200);
+      assert.equal((await request('/attempts',undefined,who)).data.attempts.length,1);
+      assert.equal((await request('/question-papers/'+(await paper())._id+'/start',{},who)).status,403);
     });
     await t.test('unsubmitted payloads never expose grading keys; archive retains authorized completed result',async()=>{
       const who=await identity(),p=await paper(),a=await start(p,who);
@@ -182,8 +183,8 @@ test('Phase 4 standalone MongoDB + HTTP exam security',async(t)=>{
       await QuestionPaper.updateOne({_id:p._id},{$set:{availableUntil:new Date(Date.now()-21*60000)}});
       assert.ok((await request('/attempts/'+a.id,undefined,who)).data.attempt.answers.every((answer)=>answer.correctOption==='A'));
       await User.updateOne({_id:who.user._id},{$set:{group:'Humanities'}});
-      assert.equal((await request('/attempts/'+a.id,undefined,who)).status,403);
-      assert.equal((await request('/attempts',undefined,who)).data.attempts.length,0);
+      assert.equal((await request('/attempts/'+a.id,undefined,who)).status,200);
+      assert.equal((await request('/attempts',undefined,who)).data.attempts.length,1);
     });
     await t.test('missing uniqueness indexes fail closed before any quota/result commit',async()=>{
       const who=await identity(),a=await start(await paper(),who);

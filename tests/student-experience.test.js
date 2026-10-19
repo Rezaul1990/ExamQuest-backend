@@ -3,7 +3,7 @@ const assert = require('node:assert/strict');
 const { randomUUID } = require('node:crypto');
 const mongoose = require('mongoose');
 const { Book, Chapter, QuestionPaper, ExamAttempt, ExamSubmission } = require('../src/modules/exam/exam.models');
-const { User, AuthSession } = require('../src/modules/auth/auth.models');
+const { User, AuthSession, AuditLog } = require('../src/modules/auth/auth.models');
 const { LearningBookmark, ExamReminder, QuestionReport } = require('../src/modules/exam/exam.learning-models');
 const { issueAccessToken } = require('../src/modules/auth/auth.tokens');
 const app = require('../src/app');
@@ -72,8 +72,8 @@ test('student experience: isolated HTTP ownership, release, learning, reports an
       const quotaBefore=await ExamSubmission.countDocuments({}); await request('/learning'); assert.equal(await ExamSubmission.countDocuments({}),quotaBefore);
       await request(path,member,{enabled:false}); assert.equal(await LearningBookmark.countDocuments({}),0);
       await User.updateOne({_id:member.user._id},{$set:{group:'Humanities'}});
-      assert.equal((await request('/learning')).data.submissionCount,0);
-      assert.equal((await request('/learning/attempts/'+attempt.id+'/review')).status,403);
+      assert.equal((await request('/learning')).data.submissionCount,1);
+      assert.equal((await request('/learning/attempts/'+attempt.id+'/review')).status,200);
       await User.updateOne({_id:member.user._id},{$set:{group:'Science'}});
     });
     await t.test('question reports validate owned snapshot and Admin-only triage without regrading',async()=>{
@@ -145,6 +145,46 @@ test('student experience: isolated HTTP ownership, release, learning, reports an
         const response=await starting;assert.equal(response.status,201);
         assert.ok(Date.parse(response.data.attempt.expiresAt)<=stored.availableUntil.getTime()+stored.durationMinutes*60000);
       }finally{resume();ExamAttempt.findOneAndUpdate=original;if(starting)await starting;}
+    });
+    await t.test('academic profile confirmation/roles/revision protect updates while historical results and new eligibility remain correct',async()=>{
+      const profile = { educationLevel:'HSC',className:'HSC',group:'Humanities',academicYear:2027,confirmed:true,expectedRevision:0 };
+      async function change(body,who=member) {
+        const response=await fetch('http://127.0.0.1:'+server.address().port+'/api/v1/auth/me/academic-profile',{method:'PATCH',headers:{'Content-Type':'application/json',...(who?{Authorization:'Bearer '+who.token}:{})},body:JSON.stringify(body)});
+        return {status:response.status,...await response.json()};
+      }
+      assert.equal((await change(profile,null)).status,401);
+      assert.equal((await change(profile,staff)).status,403);assert.equal((await change(profile,admin)).status,403);
+      for(const patch of [{confirmed:false},{expectedRevision:-1},{group:'bad'},{academicYear:2101},{role:'ADMIN'},{userId:String(stranger.user._id)},{educationLevel:'SSC',className:'HSC'}]) assert.equal((await change({...profile,...patch})).status,422);
+      // Exercise old records without a stored revision; safe DTO defaults to revision zero.
+      await User.collection.updateOne({_id:member.user._id},{$unset:{academicProfileRevision:1}});
+      const snapshot=async()=>JSON.stringify({paper:await QuestionPaper.findById(p._id).select('+answerKey').lean(),attempt:await ExamAttempt.findById(attempt.id).lean(),submission:await ExamSubmission.findOne({attemptId:attempt.id}).lean()});
+      const frozen=await snapshot(),oldQuota=(await request('/status')).data.used;
+      const result=await change(profile);assert.equal(result.status,200);assert.equal(result.data.user.group,'Humanities');assert.equal(result.data.user.academicProfileRevision,1);
+      assert.equal(await snapshot(),frozen);
+      assert.equal((await request('/attempts')).data.attempts.some((a)=>a.id===attempt.id),true);
+      assert.equal((await request('/attempts/'+attempt.id)).data.attempt.score,0);
+      assert.equal((await request('/learning/attempts/'+attempt.id+'/review')).data.available,true);
+      assert.ok((await request('/learning')).data.trend.some((row)=>row.attemptId===attempt.id));
+      assert.equal((await request('/learning/attempts/'+attempt.id+'/review',stranger)).status,404);
+      assert.equal((await request('/status')).data.used,oldQuota);
+      const oldFuture=await paper();assert.equal((await request('/question-papers/'+oldFuture._id+'/start',member,{},'POST')).status,403);
+      const humanityBook=await Book.create({title:'History',subject:'History',className:'HSC',group:'Humanities',createdByUserId:admin.user._id});
+      const future=await paper({bookId:humanityBook._id,eligibleGroups:['Humanities'],academicContext:{className:'HSC',bookTitle:'History',subject:'History'}});
+      assert.ok((await request('/question-papers')).data.questionPapers.some((row)=>row.id===String(future._id)));
+      assert.ok((await request('/learning/discovery')).data.papers.some((row)=>row.id===String(future._id)));
+      assert.equal((await change(profile)).status,409);
+      const concurrent=await Promise.all([change({...profile,expectedRevision:1,academicYear:2028}),change({...profile,expectedRevision:1,academicYear:2029})]);
+      assert.deepEqual(concurrent.map((r)=>r.status).sort(),[200,409]);
+      assert.equal((await User.findById(member.user._id)).academicProfileRevision,2);
+      assert.equal(await AuditLog.countDocuments({eventType:'ACADEMIC_PROFILE_UPDATED',targetUserId:member.user._id}),2);
+      const fresh=await identity(),live=await paper();
+      const started=(await request('/question-papers/'+live._id+'/start',fresh,{},'POST')).data.attempt;
+      assert.equal((await change(profile,fresh)).status,200);
+      assert.equal((await request('/attempts/'+started.id,fresh)).status,200);
+      assert.equal((await request('/attempts/'+started.id+'/answers',fresh,{answers:[],revision:0})).status,200);
+      assert.equal((await request('/learning/attempts/'+started.id+'/review',fresh)).status,409);
+      const submitted=await request('/attempts/'+started.id+'/submit',fresh,{answers:[]},'POST');assert.equal(submitted.status,200);
+      assert.ok(!JSON.stringify(submitted).includes('correctOption'));
     });
   } finally {
     if(server) await new Promise((r)=>server.close(r));

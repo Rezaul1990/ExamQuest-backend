@@ -1,9 +1,9 @@
-# Serviq Backend — scoped Codex instructions
+# ExamQuest Backend — scoped Codex instructions
 
 - Read `BACKEND_ARCHITECTURE.md` before implementing server features; follow its controller/service/repository boundaries and current project conventions.
 - Backend owns business rules, validation, security and database integrity. Never trust mobile-provided roles, ownership, prices or permissions.
 - For API changes, update `../docs/API_CONTRACT.md` and coordinate frontend types/services/hooks/screen as needed under root `AGENTS.md`. Mark partial work if a requested full-stack feature remains disconnected.
-- Use Node.js/Express/TypeScript and only install packages after compatibility review; update lockfiles and migration/config docs. Keep secrets out of source and screenshots.
+- Use the existing Node.js/Express CommonJS JavaScript modules (`src/app.js`, `src/server.js`); do not introduce a TypeScript migration as routine feature work. Only install packages after compatibility review; update lockfiles and migration/config docs. Keep secrets out of source and screenshots.
 - Provide integration tests on validation, permission and state transitions when appropriate. Report actual commands, changes, and blockers using `../docs/DELIVERY_REPORT_TEMPLATE.md`.
 - This folder is its own Git repository for `ExamQuest-backend`; commit and push backend changes only from `backend/`. Do not use the workspace root as a Git repository, and do not include `.env`, secrets, `node_modules`, generated builds, or cache files.
 

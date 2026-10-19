@@ -8,16 +8,23 @@ function buildLink(path, token) {
 async function sendMail({ to, subject, text }) {
   const smtpReady = env.smtp.host && env.smtp.user && env.smtp.pass;
   if (!smtpReady) {
-    console.log(`[dev-mail] ${subject} for ${to}: ${text}`);
+    console.warn('[mail] Delivery skipped: SMTP is not configured.');
     return;
   }
-  const transport = nodemailer.createTransport({
-    host: env.smtp.host,
-    port: env.smtp.port,
-    secure: env.smtp.secure,
-    auth: { user: env.smtp.user, pass: env.smtp.pass },
-  });
-  await transport.sendMail({ to, from: env.smtp.from, subject, text });
+  try {
+    const transport = nodemailer.createTransport({
+      host: env.smtp.host,
+      port: env.smtp.port,
+      secure: env.smtp.secure,
+      auth: { user: env.smtp.user, pass: env.smtp.pass },
+    });
+    await transport.sendMail({ to, from: env.smtp.from, subject, text });
+  } catch {
+    const error = new Error('Mail delivery is temporarily unavailable');
+    error.statusCode = 503;
+    error.code = 'MAIL_DELIVERY_FAILED';
+    throw error;
+  }
 }
 
 module.exports = { buildLink, sendMail };

@@ -183,6 +183,8 @@ test('Phase 3: isolated MongoDB + real HTTP paper authoring', async (t) => {
       for(const who of [member,forged])for(const [route,method,body] of [
         ['/admin/books','GET'],['/admin/books/'+book._id+'/chapters','GET'],['/admin/questions','GET'],['/admin/question-papers','GET'],['/admin/question-papers/candidates?bookId='+book._id,'GET'],['/admin/question-papers/'+paper.id+'/preview','GET'],['/admin/question-analytics','GET'],
         ['/admin/books','POST',{}],['/admin/chapters','POST',{}],['/admin/questions','POST',{role:'ADMIN'}],['/admin/questions/import/preview','POST',{}],['/admin/questions/import/commit','POST',{}],['/admin/question-papers/generate','POST',{}],['/admin/question-papers','POST',payload()],['/admin/question-papers/'+paper.id+'/status','POST',{status:'published'}],['/admin/question-papers/'+paper.id+'/review','POST',{}],['/admin/questions/'+questions[0].id,'PATCH',{}],['/admin/questions/'+questions[0].id,'DELETE'],['/admin/question-papers/'+paper.id,'DELETE'],
+        ['/admin/books/'+book._id,'PATCH',{}],['/admin/chapters/'+chapter._id,'PATCH',{}],['/admin/question-papers/'+paper.id,'PATCH',{}],['/admin/questions/'+questions[0].id+'/review','POST',{}],
+        ['/admin/student-reports','GET'],['/admin/student-reports/'+questions[0].id,'PATCH',{}],['/admin/question-papers/'+paper.id+'/release-results','POST',{}],
       ])assert.equal((await request('/exams'+route,body,who,method)).status,403,method+' '+route);
       const limited=await identity('STAFF',{permissions:['CONTENT_READ'],bookIds:[book._id]});
       assert.equal((await request('/exams/admin/books',undefined,limited)).status,200);
@@ -191,6 +193,35 @@ test('Phase 3: isolated MongoDB + real HTTP paper authoring', async (t) => {
       assert.equal((await request('/exams/admin/question-papers',payload(),limited)).status,403);
       const allowed=await request('/exams/admin/questions',qPayload('Allowed scoped staff question'),staff);assert.equal(allowed.status,201);
       assert.equal((await request('/exams/question-papers',undefined,member)).status,200);
+    });
+    await t.test('cross-role account administration denies Member and all supported Staff permissions before mutations',async()=>{
+      const { ROLE_PERMISSIONS } = require('../src/modules/auth/auth.constants');
+      const fullStaff = await identity('STAFF',{permissions:ROLE_PERMISSIONS.STAFF,bookIds:[book._id]});
+      const forged = await identity('MEMBER',{permissions:['USERS_MANAGE','STAFF_INVITE'],className:'HSC',group:'Science',academicYear:2026});
+      const usersBefore = await User.countDocuments();
+      const targetBefore = await User.findById(staff.user._id).lean();
+      const routes = [
+        ['/admin/staff/'+staff.user._id+'/scope','PATCH',{bookIds:[String(common._id)]}],
+        ['/admin/staff','POST',{}],['/admin/staff/invite','POST',{}],['/admin/staff/invites','GET'],
+        ['/admin/staff/invites/'+staff.user._id+'/regenerate','POST',{}],['/admin/staff/invites/'+staff.user._id+'/revoke','POST',{}],
+        ['/admin/users','GET'],['/admin/users/'+staff.user._id+'/status','PATCH',{accountStatus:'suspended'}],
+        ['/admin/users/'+staff.user._id+'/revoke-sessions','POST',{}],
+      ];
+      for (const who of [member,forged,fullStaff,null]) for (const [route,method,body] of routes) {
+        const response = await request(route,body,who,method);
+        assert.equal(response.status,who?403:401,method+' '+route);
+        assert.equal(response.error,who?'FORBIDDEN':'AUTH_REQUIRED');
+      }
+      assert.equal(await User.countDocuments(),usersBefore);
+      const targetAfter = await User.findById(staff.user._id).lean();
+      assert.deepEqual(targetAfter.bookIds,targetBefore.bookIds);
+      assert.equal(targetAfter.accountStatus,targetBefore.accountStatus);
+      assert.equal(targetAfter.authVersion,targetBefore.authVersion);
+      assert.equal((await request('/admin/users')).status,200);
+      assert.equal((await request('/admin/staff/invites')).status,200);
+      assert.equal((await request('/exams/admin/books',undefined,fullStaff)).status,200);
+      assert.equal((await request('/exams/admin/question-analytics?bookId='+book._id,undefined,fullStaff)).status,403);
+      assert.equal((await request('/exams/attempts',undefined,fullStaff)).status,403);
     });
     await t.test('admin can assign existing staff books; scope change revokes prior access session',async()=>{
       const response=await request('/admin/staff/'+noScope.user._id+'/scope',{bookIds:[String(book._id)]},admin,'PATCH');assert.equal(response.status,200);assert.deepEqual(response.data.user.bookIds,[String(book._id)]);

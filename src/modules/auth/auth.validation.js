@@ -5,6 +5,16 @@ const email = z.string().email().transform((value) => value.trim().toLowerCase()
 const password = z.string().min(10).max(128);
 const token = z.string().min(20).max(300);
 const academicGroup = z.string().trim().transform(normalizeAcademicGroup).refine(Boolean, "Select a valid academic group");
+// Registration-only normalization; do not rewrite existing users/catalog class names.
+const registrationLevel = z.string().trim().toUpperCase().pipe(z.enum(["SSC", "HSC"]));
+const registrationClass = z.string().trim().min(1).max(80).transform((value) => /^(ssc|hsc)$/i.test(value) ? value.toUpperCase() : value);
+const registrationYear = z.preprocess((value) => typeof value === 'string' && /^\d{4}$/.test(value.trim()) ? Number(value.trim()) : value, z.number().int().min(2000).max(2100));
+const academicProfileSchema = z.object({
+  educationLevel: registrationLevel, className: registrationClass, group: academicGroup,
+  academicYear: registrationYear, confirmed: z.literal(true), expectedRevision: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER - 1),
+}).strict().refine((data) => !["SSC", "HSC"].includes(data.className) || data.className === data.educationLevel, {
+  path: ["className"], message: "Class must match the selected SSC/HSC education level",
+});
 
 const registerSchema = z
   .object({
@@ -13,10 +23,10 @@ const registerSchema = z
     phone: z.string().trim().min(5).max(30),
     password,
     confirmPassword: z.string().min(10).max(128).optional(),
-    educationLevel: z.enum(["SSC", "HSC"]),
-    className: z.string().trim().min(1).max(80),
+    educationLevel: registrationLevel,
+    className: registrationClass,
     group: academicGroup,
-    academicYear: z.coerce.number().int().min(2000).max(2100),
+    academicYear: registrationYear,
     dateOfBirth: z.coerce.date().optional(),
     parent: z.object({
       name: z.string().trim().min(2).max(120),
@@ -26,6 +36,9 @@ const registerSchema = z
     }),
   })
   .strict()
+  .refine((data) => !["SSC", "HSC"].includes(data.className) || data.className === data.educationLevel, {
+    path: ["className"], message: "Class must match the selected SSC/HSC education level",
+  })
   .refine((data) => !data.confirmPassword || data.password === data.confirmPassword, {
     path: ["confirmPassword"],
     message: "Passwords do not match",
@@ -91,6 +104,7 @@ function validate(schema) {
 }
 
 module.exports = {
+  academicProfileSchema,
   validate,
   registerSchema,
   loginSchema,
